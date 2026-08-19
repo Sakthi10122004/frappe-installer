@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+# ============================================================================
+# lib/state.sh — Environment registry, installation state, resume, discovery
+# ============================================================================
+# Sourced by install-frappe.sh. Never executed directly.
+
+# ---- State file path (set after INSTALL_PATH is known) ---------------------
+
+STATE_FILE=""
+
+# ---- Registry management ---------------------------------------------------
+
+registry_init() {
+  mkdir -p "${INSTALLER_HOME}"
+  if [[ ! -f "${INSTALLER_REGISTRY}" ]]; then
+    echo '{"environments":[]}' > "${INSTALLER_REGISTRY}"
+  fi
+}
+
+# registry_add VERSION BENCH_PATH SITE_NAME — add or update an environment entry.
+registry_add() {
+  local version="$1" bench_path="$2" site="$3"
+
+  # Use Python for JSON manipulation (always available after uv installs Python,
+  # but we also need this before Python is installed — use python3 if available,
+  # otherwise do a simple append).
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${INSTALLER_REGISTRY}" "${version}" "${bench_path}" "${site}" <<'PYEOF'
+import json, sys
+reg_file, version, bench_path, site = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    with open(reg_file) as f:
+        data = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    data = {"environments": []}
+
+# Find existing entry for this bench path
+found = False
+for env in data["environments"]:
+    if env.get("bench_path") == bench_path:
+        env["framework_version"] = version
+        if site and site not in env.get("sites", []):
+            env.setdefault("sites", []).append(site)
+        found = True
+        break
+
+if not found:
+    entry = {
+        "framework_version": version,
+        "bench_path": bench_path,
+        "sites": [site] if site else []
+    }
+    data["environments"].append(entry)
+
+with open(reg_file, "w") as f:
+    json.dump(data, f, indent=2)
+PYEOF
+  else
+    # Fallback: just create a minimal registry if python3 isn't available yet.
+    # This will be corrected on re-run once Python is installed.
+    log_only "state: python3 not available for registry update, deferring."
+  fi
+}
+
+# registry_list — print discovered environments from registry.
+registry_list() {
+  if [[ ! -f "${INSTALLER_REGISTRY}" ]]; then
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${INSTALLER_REGISTRY}" <<'PYEOF'
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+    for env in data.get("environments", []):
+        v = env.get("framework_version", "?")
+        p = env.get("bench_path", "?")
+        sites = ", ".join(env.get("sites", []))
+        print(f"  Frappe {v} — {p}")
+        if sites:
+            print(f"    Sites: {sites}")
+except Exception:
+    pass
+PYEOF
+  fi
+}
+
+# ---- Bench directory validation ---------------------------------------------
+
+# is_valid_bench_dir DIR — true if DIR looks like a real Bench directory.
+is_valid_bench_dir() {
+  local dir="$1"
+  [[ -d "${dir}/apps/frappe" ]] && \
+  [[ -d "${dir}/sites" ]] && \
+  [[ -f "${dir}/Procfile" || -f "${dir}/apps.txt" ]]
+}
+
+# detect_bench_frappe_version DIR — determine which Frappe major version
+# a bench directory is running. Returns the major version number via echo.
+detect_bench_frappe_version() {
+  local dir="$1"
+  if [[ -d "${dir}/apps/frappe/.git" ]]; then
+    local branch
+    branch="$(cd "${dir}/apps/frappe" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+    case "${branch}" in
+      version-15*) echo "15"; return 0 ;;
+      version-16*) echo "16"; return 0 ;;
+      develop)     echo "dev"; return 0 ;;
+    esac
+  fi
+  # Fallback: try reading frappe/__init__.py or setup.cfg
+  if [[ -f "${dir}/apps/frappe/frappe/__init__.py" ]]; then
+    local ver
+    ver="$(grep -oE '__version__\s*=\s*"[0-9]+' "${dir}/apps/frappe/frappe/__init__.py" 2>/dev/null | grep -oE '[0-9]+' | head -n1 || echo "")"
+    [[ -n "${ver}" ]] && { echo "${ver}"; return 0; }
+  fi
+  echo "unknown"
+}
+
+# ---- Environment discovery --------------------------------------------------
+# Uses multiple mechanisms per BRD Section 4:
+# 1. Registry, 2. Known paths, 3. bench executable
+
+discover_environments() {
+  local -A discovered=()
+
+  # 1. Registry entries
+  if [[ -f "${INSTALLER_REGISTRY}" ]] && command -v python3 >/dev/null 2>&1; then
+    while IFS= read -r path; do
+      [[ -n "${path}" ]] && discovered["${path}"]=1
+    done < <(python3 -c "
+import json, sys
+try:
+    with open('${INSTALLER_REGISTRY}') as f:
+        data = json.load(f)
+    for env in data.get('environments', []):
+        p = env.get('bench_path', '')
+        if p:
+            print(p)
+except Exception:
+    pass
+")
+  fi
+
+  # 2. Known paths
+  for path in "${KNOWN_BENCH_PATHS[@]}"; do
+    [[ -d "${path}" ]] && discovered["${path}"]=1
+  done
+
+  # 3. User-specified install path (if set)
+  if [[ -n "${INSTALL_PATH:-}" && -d "${INSTALL_PATH}/${BENCH_SUBDIR}" ]]; then
+    discovered["${INSTALL_PATH}/${BENCH_SUBDIR}"]=1
+  fi
+
+  # Validate and report
+  local found_any=0
+  for path in "${!discovered[@]}"; do
+    if is_valid_bench_dir "${path}"; then
+      local ver
+      ver="$(detect_bench_frappe_version "${path}")"
+      ui_ok "Frappe ${ver} — ${path}"
+      found_any=1
+    fi
+  done
+
+  if [[ "${found_any}" -eq 0 ]]; then
+    ui_info "No existing Frappe environments detected."
+  fi
+
+  return 0
+}
+
+# ---- Installation state tracking --------------------------------------------
+
+state_init() {
+  STATE_FILE="${INSTALLER_STATE_DIR}/install_$(echo -n "${BENCH_DIR}" | md5sum | cut -c1-12).json"
+  if [[ ! -f "${STATE_FILE}" ]]; then
+    cat > "${STATE_FILE}" <<'EOF'
+{
+  "os_checked": false,
+  "dependencies_ready": false,
+  "mariadb_ready": false,
+  "redis_ready": false,
+  "node_ready": false,
+  "python_ready": false,
+  "bench_ready": false,
+  "site_created": false,
+  "migration_complete": false,
+  "verification_complete": false,
+  "bench_path": "",
+  "frappe_version": "",
+  "site_name": ""
+}
+EOF
+  fi
+}
+
+# save_state — write current progress to the state file.
+save_state() {
+  [[ -z "${STATE_FILE:-}" ]] && return 0
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${STATE_FILE}" <<PYEOF
+import json, sys
+state_file = sys.argv[1]
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    state = {}
+state["bench_path"] = "${BENCH_DIR}"
+state["frappe_version"] = "${SELECTED_FRAPPE_VERSION}"
+state["site_name"] = "${SITE_NAME}"
+with open(state_file, "w") as f:
+    json.dump(state, f, indent=2)
+PYEOF
+  fi
+}
+
+# update_state KEY VALUE — set a single state key.
+update_state() {
+  local key="$1" value="$2"
+  [[ -z "${STATE_FILE:-}" ]] && return 0
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${STATE_FILE}" "${key}" "${value}" <<'PYEOF'
+import json, sys
+state_file, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+val = True if value == "true" else (False if value == "false" else value)
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    state = {}
+state[key] = val
+with open(state_file, "w") as f:
+    json.dump(state, f, indent=2)
+PYEOF
+  fi
+}
+
+# read_state KEY — read a state value, echoing it.
+read_state() {
+  local key="$1"
+  [[ -z "${STATE_FILE:-}" || ! -f "${STATE_FILE}" ]] && { echo ""; return 0; }
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${STATE_FILE}" "${key}" <<'PYEOF'
+import json, sys
+state_file, key = sys.argv[1], sys.argv[2]
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+    val = state.get(key, "")
+    if isinstance(val, bool):
+        print("true" if val else "false")
+    else:
+        print(val)
+except Exception:
+    print("")
+PYEOF
+  else
+    echo ""
+  fi
+}
+
+# check_resume — detect a previous incomplete installation and offer to resume.
+check_resume() {
+  [[ -z "${STATE_FILE:-}" || ! -f "${STATE_FILE}" ]] && return 0
+
+  local verification_done
+  verification_done="$(read_state "verification_complete")"
+  [[ "${verification_done}" == "true" ]] && return 0
+
+  # Check if any stage was started
+  local any_progress=false
+  for key in os_checked dependencies_ready mariadb_ready redis_ready node_ready python_ready bench_ready site_created; do
+    local val
+    val="$(read_state "${key}")"
+    if [[ "${val}" == "true" ]]; then
+      any_progress=true
+      break
+    fi
+  done
+
+  [[ "${any_progress}" == "false" ]] && return 0
+
+  ui_blank
+  ui_warn "Previous incomplete installation detected."
+  ui_blank
+
+  # Find last completed stage
+  local last_stage="pre-flight"
+  [[ "$(read_state "os_checked")" == "true" ]] && last_stage="System detection"
+  [[ "$(read_state "dependencies_ready")" == "true" ]] && last_stage="Dependency resolution"
+  [[ "$(read_state "mariadb_ready")" == "true" ]] && last_stage="MariaDB"
+  [[ "$(read_state "redis_ready")" == "true" ]] && last_stage="Redis"
+  [[ "$(read_state "node_ready")" == "true" ]] && last_stage="Node.js"
+  [[ "$(read_state "python_ready")" == "true" ]] && last_stage="Python"
+  [[ "$(read_state "bench_ready")" == "true" ]] && last_stage="Bench"
+  [[ "$(read_state "site_created")" == "true" ]] && last_stage="Site creation"
+  [[ "$(read_state "migration_complete")" == "true" ]] && last_stage="Migration"
+
+  ui_line "  Last completed stage: ${last_stage}"
+  ui_blank
+
+  if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    ui_info "Resuming automatically (non-interactive mode)."
+    return 0
+  fi
+
+  local choice
+  choice="$(ui_select "What would you like to do?" 1 \
+    "Resume installation" \
+    "Inspect current state" \
+    "Start a new environment" \
+    "Exit")"
+
+  case "${choice}" in
+    1) ui_info "Resuming installation..."; return 0 ;;
+    2)
+      ui_summary_header "Installation State"
+      for key in os_checked dependencies_ready mariadb_ready redis_ready node_ready python_ready bench_ready site_created migration_complete verification_complete; do
+        local val
+        val="$(read_state "${key}")"
+        if [[ "${val}" == "true" ]]; then
+          ui_ok "${key}"
+        else
+          ui_fail "${key}"
+        fi
+      done
+      ui_blank
+      ui_info "Re-running will resume from the next incomplete stage."
+      exit 0
+      ;;
+    3) ui_info "Starting fresh..."; rm -f "${STATE_FILE}"; return 0 ;;
+    4) exit 0 ;;
+  esac
+}
+
+# ---- Frappe version selection -----------------------------------------------
+
+select_frappe_version() {
+  # If --version was specified, use it directly
+  if [[ -n "${SELECTED_FRAPPE_VERSION}" ]]; then
+    _apply_version_config "${SELECTED_FRAPPE_VERSION}"
+    return 0
+  fi
+
+  if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    # Default to Frappe 16 in non-interactive mode
+    _apply_version_config "16"
+    return 0
+  fi
+
+  local choice
+  choice="$(ui_select "Which Frappe Framework version do you want?" 1 \
+    "Frappe 16 (recommended)" \
+    "Frappe 15" \
+    "Exit")"
+
+  case "${choice}" in
+    1) _apply_version_config "16" ;;
+    2) _apply_version_config "15" ;;
+    3) exit 0 ;;
+  esac
+}
+
+# _apply_version_config VERSION — populate FRAPPE_CONFIG from the version arrays.
+_apply_version_config() {
+  local version="$1"
+  SELECTED_FRAPPE_VERSION="${version}"
+
+  case "${version}" in
+    15)
+      for key in "${!FRAPPE_15_CONFIG[@]}"; do
+        FRAPPE_CONFIG["${key}"]="${FRAPPE_15_CONFIG[${key}]}"
+      done
+      ;;
+    16)
+      for key in "${!FRAPPE_16_CONFIG[@]}"; do
+        FRAPPE_CONFIG["${key}"]="${FRAPPE_16_CONFIG[${key}]}"
+      done
+      ;;
+    *)
+      fail_fatal "Unknown Frappe version: ${version}"
+      exit 1
+      ;;
+  esac
+
+  FRAPPE_BRANCH="${FRAPPE_CONFIG[branch]}"
+
+  # Set default install path based on version
+  if [[ -z "${INSTALL_PATH}" ]]; then
+    case "${version}" in
+      15) INSTALL_PATH="${DEFAULT_INSTALL_PATH_15}" ;;
+      16) INSTALL_PATH="${DEFAULT_INSTALL_PATH_16}" ;;
+    esac
+  fi
+  BENCH_DIR="${INSTALL_PATH%/}/${BENCH_SUBDIR}"
+
+  ui_ok "Selected: Frappe ${version} (branch: ${FRAPPE_BRANCH})"
+  log_only "Frappe version: ${version}, branch: ${FRAPPE_BRANCH}, path: ${BENCH_DIR}"
+}

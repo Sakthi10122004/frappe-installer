@@ -1,0 +1,23 @@
+# Secrets — never commit generated credentials
+credentials/
+*.credentials.txt
+frappe-credentials.txt
+
+# Installer registry and state (user-specific)
+.frappe-installer/
+
+# Installer logs
+*.log
+
+# A bench created by running this installer locally for testing
+frappe-bench/
+frappe/
+frappe15/
+frappe16/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
