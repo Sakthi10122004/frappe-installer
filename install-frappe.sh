@@ -65,6 +65,7 @@ OPTIONS:
   --path PATH          Installation directory. Default: ~/frappe<VERSION>
                        The bench will be created at PATH/frappe-bench
   --site SITE_NAME     Site name to create. Default: frappe.local
+  --env TYPE           Environment type (local or prod). Default: interactive
   --non-interactive    Never prompt. Fail instead of asking.
   --check              System check — make no changes, report status.
   --doctor             Diagnose common problems and suggest fixes.
@@ -77,8 +78,8 @@ EXAMPLES:
   ./${INSTALLER_NAME}
   ./${INSTALLER_NAME} --version 16
   ./${INSTALLER_NAME} --version 15 --site college.local
-  ./${INSTALLER_NAME} --path "/home/user/Frappe Projects" --version 16
-  ./${INSTALLER_NAME} --non-interactive --version 16 --site prod.local
+  ./${INSTALLER_NAME} --env prod --version 16
+  ./${INSTALLER_NAME} --non-interactive --env local --version 16 --site prod.local
 
 Re-running this script is safe: it detects what is already installed and
 configured, and only performs the steps that are still needed.
@@ -86,7 +87,7 @@ EOF
 }
 
 parse_args() {
-  local run_mode="install"  # install, check, doctor, list, dry-run, repair
+  RUN_MODE="install"  # install, check, doctor, list, dry-run, repair
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -105,18 +106,28 @@ parse_args() {
         SITE_NAME="$2"; shift 2 ;;
       --site=*)
         SITE_NAME="${1#*=}"; shift ;;
+      --env)
+        [[ $# -ge 2 ]] || { echo "Error: --env requires a value (local or prod)" >&2; exit 2; }
+        ENVIRONMENT_TYPE="$2"; shift 2 ;;
+      --env=*)
+        ENVIRONMENT_TYPE="${1#*=}"; shift ;;
       --non-interactive)
         NON_INTERACTIVE=1; shift ;;
       --check)
-        run_mode="check"; shift ;;
+        RUN_MODE="check"; shift ;;
       --doctor)
-        run_mode="doctor"; shift ;;
+        RUN_MODE="doctor"; shift ;;
+      --component)
+        [[ $# -ge 2 ]] || { echo "Error: --component requires a value" >&2; exit 2; }
+        DOCTOR_COMPONENT="$2"; shift 2 ;;
+      --component=*)
+        DOCTOR_COMPONENT="${1#*=}"; shift ;;
       --list)
-        run_mode="list"; shift ;;
+        RUN_MODE="list"; shift ;;
       --dry-run)
-        run_mode="dry-run"; shift ;;
+        RUN_MODE="dry-run"; shift ;;
       --repair)
-        run_mode="repair"; shift ;;
+        RUN_MODE="repair"; shift ;;
       -h|--help)
         print_help; exit 0 ;;
       *)
@@ -146,7 +157,16 @@ parse_args() {
     esac
   fi
 
-  echo "${run_mode}"
+  # Validate --env if specified
+  if [[ -n "${ENVIRONMENT_TYPE:-}" ]]; then
+    case "${ENVIRONMENT_TYPE}" in
+      local|prod) : ;;
+      *)
+        echo "Error: --env must be local or prod (got '${ENVIRONMENT_TYPE}')" >&2
+        exit 2
+        ;;
+    esac
+  fi
 }
 
 # ============================================================================
@@ -167,8 +187,9 @@ main_install() {
   registry_init
   discover_environments
 
-  # ---- Stage 3: Version selection -------------------------------------------
-  ui_stage "Version selection"
+  # ---- Stage 3: Version & Environment selection -----------------------------
+  ui_stage "Environment setup"
+  select_environment_type
   select_frappe_version
   check_os_compatibility "${SELECTED_FRAPPE_VERSION}"
 
@@ -237,13 +258,12 @@ main_install() {
 # ============================================================================
 
 main() {
-  local run_mode
-  run_mode="$(parse_args "$@")"
+  parse_args "$@"
 
   # Install traps
   install_traps
 
-  case "${run_mode}" in
+  case "${RUN_MODE}" in
     check)   run_check ;;
     doctor)  run_doctor ;;
     list)    run_list ;;

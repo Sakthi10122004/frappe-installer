@@ -22,8 +22,20 @@ run_doctor() {
   ui_banner
   ui_line "${C_BOLD}Doctor Mode${C_RESET}"
   ui_blank
+  log_init
+
+  if [[ -n "${DOCTOR_COMPONENT:-}" ]]; then
+    if [[ "${DOCTOR_COMPONENT}" == "mariadb" ]]; then
+      diagnose_mariadb
+      exit 0
+    else
+      ui_warn "Component '${DOCTOR_COMPONENT}' not recognized."
+      exit 1
+    fi
+  fi
+
   ui_info "The --doctor command will be fully implemented in Phase 2."
-  ui_info "It will diagnose OS, dependencies, services, sites, and connectivity."
+  ui_info "For now, try: ./install-frappe.sh --doctor --component mariadb"
   exit 0
 }
 

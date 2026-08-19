@@ -336,6 +336,38 @@ check_resume() {
   esac
 }
 
+# ---- Environment Type Selection ---------------------------------------------
+
+select_environment_type() {
+  if [[ -n "${ENVIRONMENT_TYPE:-}" ]]; then
+    ui_ok "Selected environment type: ${ENVIRONMENT_TYPE}"
+    return 0
+  fi
+
+  if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    fail_fatal "Environment type (--env) is required in non-interactive mode."
+    return 1
+  fi
+
+  ui_blank
+  ui_line "  Is this a Local Setup or a Production Server?"
+  ui_blank
+  ui_line "  [1] Local Setup (Development/Testing)"
+  ui_line "  [2] Production Server"
+  ui_blank
+
+  local choice
+  choice="$(ui_select "Select" "1")"
+  
+  case "${choice}" in
+    1) ENVIRONMENT_TYPE="local" ;;
+    2) ENVIRONMENT_TYPE="prod" ;;
+    *) fail_fatal "Invalid selection" ; return 1 ;;
+  esac
+  
+  ui_ok "Selected: ${ENVIRONMENT_TYPE} environment"
+}
+
 # ---- Frappe version selection -----------------------------------------------
 
 select_frappe_version() {

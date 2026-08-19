@@ -58,12 +58,15 @@ install_mariadb() {
   run_step "Enabling MariaDB service" "enable mariadb" \
     svc_enable mariadb
 
-  # Start MariaDB with AppArmor awareness
-  if ! _start_mariadb_safely; then
+  # Start MariaDB (No auto-fixes!)
+  if ! svc_start mariadb 2>/dev/null; then
     fail_fatal "MariaDB service could not be started."
     ui_blank
-    ui_line "Try running: sudo bash fix_apparmor.sh"
-    ui_line "Or: sudo bash fix_mariadb.sh"
+    ui_line "  ${C_RED}MariaDB could not be started.${C_RESET}"
+    ui_blank
+    ui_line "  Please run the diagnostic tool to identify the issue:"
+    ui_line "  ${C_CYAN}./${INSTALLER_NAME} --doctor --component mariadb${C_RESET}"
+    ui_blank
     return 1
   fi
 
@@ -75,55 +78,212 @@ install_mariadb() {
   update_state "mariadb_ready" "true"
 }
 
-# ---- Start MariaDB with AppArmor recovery ----------------------------------
+# ---- MariaDB Diagnostics and Repair ------------------------------------------
 
-_start_mariadb_safely() {
-  # First attempt: normal start
-  if svc_is_active mariadb; then
-    return 0
+diagnose_mariadb() {
+  ui_line "╔══════════════════════════════════════════════════════════╗"
+  ui_line "║              MARIADB DIAGNOSTIC REPORT                  ║"
+  ui_line "╚══════════════════════════════════════════════════════════╝"
+  ui_blank
+  ui_line "MariaDB could not be started."
+  ui_blank
+
+  local causes=()
+  local repairs=()
+
+  # 1. Check AppArmor
+  if check_mariadb_apparmor; then
+    causes+=("AppArmor permission denial")
+    repairs+=("repair_mariadb_apparmor")
   fi
 
-  if svc_start mariadb 2>/dev/null; then
-    return 0
+  # 2. Check Data Directory
+  if check_mariadb_datadir; then
+    causes+=("Data directory is corrupted or partially initialized")
+    repairs+=("initialize_fresh_mariadb")
   fi
 
-  # If start failed, check for AppArmor issues (common on Ubuntu 24.04+/26.04)
-  log_only "MariaDB failed to start, checking for AppArmor issues..."
+  if [[ ${#causes[@]} -gt 0 ]]; then
+    ui_line "Causes detected:"
+    for cause in "${causes[@]}"; do
+      ui_line "  - ${cause}"
+    done
+    ui_blank
+    ui_line "The installer did NOT modify your database automatically."
+    ui_blank
 
-  local apparmor_profile="/etc/apparmor.d/usr.sbin.mariadbd"
-  if [[ -f "${apparmor_profile}" ]] && command -v apparmor_parser >/dev/null 2>&1; then
-    ui_warn "MariaDB failed to start. Attempting AppArmor profile fix..."
-
-    # Disable the problematic AppArmor profile
-    "${SUDO[@]}" ln -sf "${apparmor_profile}" /etc/apparmor.d/disable/ 2>/dev/null || true
-    "${SUDO[@]}" apparmor_parser -R "${apparmor_profile}" 2>/dev/null || true
-
-    log_only "AppArmor profile for mariadbd disabled."
-
-    # Ensure data directory has correct permissions
-    if [[ -d /var/lib/mysql ]]; then
-      "${SUDO[@]}" chown -R mysql:mysql /var/lib/mysql 2>/dev/null || true
-      "${SUDO[@]}" chmod 700 /var/lib/mysql 2>/dev/null || true
+    if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+      ui_warn "Cannot perform interactive repair in non-interactive mode."
+      return 1
     fi
 
-    # Reinitialize if the data directory is empty or corrupted
-    if [[ ! -f /var/lib/mysql/ibdata1 ]]; then
-      ui_warn "MariaDB data directory appears uninitialized. Initializing..."
-      "${SUDO[@]}" mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql >> "${LOG_FILE}" 2>&1 || true
-    fi
+    local answer=""
+    read -r -p "Would you like to attempt targeted repairs? [y/N]: " answer
+    if [[ "${answer}" =~ ^[Yy]$ ]]; then
+      ui_blank
+      local all_success=true
+      for repair in "${repairs[@]}"; do
+        ui_info "Running ${repair}..."
+        if ! "${repair}"; then
+          ui_warn "Failed: ${repair}"
+          all_success=false
+          break
+        fi
+      done
 
-    # Retry start
-    if svc_start mariadb 2>/dev/null; then
-      ui_ok "MariaDB started successfully after AppArmor fix"
+      if [[ "${all_success}" == "true" ]]; then
+        ui_ok "Repairs successful! Let's test the service..."
+        if svc_start mariadb 2>/dev/null; then
+           ui_ok "MariaDB started successfully! You can now re-run the installer."
+           return 0
+        else
+           ui_warn "MariaDB still failed to start after repairs."
+        fi
+      fi
+    else
+      ui_line "Skipping repairs."
+    fi
+  else
+    ui_line "No common causes detected. Please check journalctl -xeu mariadb.service"
+  fi
+
+  # ---- FALLBACK MENU ----
+  ui_blank
+  ui_line "╔══════════════════════════════════════════════════════════╗"
+  ui_line "║                   FALLBACK OPTIONS                      ║"
+  ui_line "╚══════════════════════════════════════════════════════════╝"
+  ui_blank
+  ui_line "If MariaDB refuses to install locally, you can choose a fallback:"
+  ui_blank
+  ui_line "  [1] Bypass Native MariaDB (I will connect Frappe to a remote or Docker DB)"
+  
+  if [[ "${ENVIRONMENT_TYPE:-prod}" == "local" ]]; then
+    ui_line "  [2] Nuclear Reset (Purge MariaDB entirely and reinstall)"
+  fi
+  ui_line "  [3] Exit and fix manually"
+  ui_blank
+
+  local choice
+  choice="$(ui_select "Select" "3")"
+
+  case "${choice}" in
+    1)
+      ui_ok "Bypassing local MariaDB installation."
+      update_state "mariadb_ready" "true"
+      ui_info "MariaDB stage marked as complete. Re-run the installer to continue."
       return 0
-    fi
+      ;;
+    2)
+      if [[ "${ENVIRONMENT_TYPE:-prod}" == "local" ]]; then
+        repair_mariadb_hard_reset
+        return $?
+      else
+        fail_fatal "Invalid selection."
+        return 1
+      fi
+      ;;
+    3|*)
+      ui_line "Exiting without making further changes."
+      return 1
+      ;;
+  esac
+}
+
+check_mariadb_apparmor() {
+  # If the profile exists and is not a symlink to disable/, AppArmor will enforce it
+  if [[ -f "/etc/apparmor.d/usr.sbin.mysqld" ]] && [[ ! -L "/etc/apparmor.d/usr.sbin.mysqld" ]]; then
+    return 0
+  fi
+  if [[ -f "/etc/apparmor.d/usr.sbin.mariadbd" ]] && [[ ! -L "/etc/apparmor.d/usr.sbin.mariadbd" ]]; then
+    return 0
   fi
 
-  # Final attempt: check journalctl for clues
-  log_only "MariaDB still failing. Capturing journal output..."
-  "${SUDO[@]}" journalctl -xeu mariadb.service --no-pager -n 30 >> "${LOG_FILE}" 2>&1 || true
-
+  # Fallback to checking kernel logs (no sudo to prevent fingerprint prompt hiding)
+  if journalctl -k -n 100 2>/dev/null | grep -q "apparmor=.*DENIED.*\(mariadbd\|mysqld\)"; then
+    return 0
+  fi
+  
   return 1
+}
+
+repair_mariadb_apparmor() {
+  local apparmor_profile=""
+  if [[ -f "/etc/apparmor.d/usr.sbin.mysqld" ]]; then
+    apparmor_profile="/etc/apparmor.d/usr.sbin.mysqld"
+  elif [[ -f "/etc/apparmor.d/usr.sbin.mariadbd" ]]; then
+    apparmor_profile="/etc/apparmor.d/usr.sbin.mariadbd"
+  fi
+
+  if [[ -n "${apparmor_profile}" ]]; then
+    # Create the disable directory since it might not exist on newer Ubuntu
+    "${SUDO[@]}" mkdir -p /etc/apparmor.d/disable
+    
+    # Symlink it
+    "${SUDO[@]}" ln -sf "${apparmor_profile}" /etc/apparmor.d/disable/ 2>/dev/null || true
+    
+    # Unload it from kernel
+    "${SUDO[@]}" apparmor_parser -R "${apparmor_profile}" 2>/dev/null || true
+    
+    # Fully reload AppArmor service to clear cached enforcement rules which cause Errcode 13
+    "${SUDO[@]}" systemctl reload apparmor.service 2>/dev/null || true
+    return 0
+  fi
+  return 1
+}
+
+check_mariadb_datadir() {
+  # If /var/lib/mysql exists but /var/lib/mysql/mysql (the core DB) does not, it's corrupt
+  if [[ -d /var/lib/mysql ]] && ! "${SUDO[@]}" test -d /var/lib/mysql/mysql; then
+    return 0
+  fi
+  return 1
+}
+
+initialize_fresh_mariadb() {
+  if ! "${SUDO[@]}" test -d /var/lib/mysql/mysql; then
+    "${SUDO[@]}" bash -c 'mv /var/lib/mysql "/var/lib/mysql.bak.$(date +%s)" 2>/dev/null || true'
+    "${SUDO[@]}" mkdir -p /var/lib/mysql
+    "${SUDO[@]}" chown mysql:mysql /var/lib/mysql
+    "${SUDO[@]}" chmod 700 /var/lib/mysql
+    
+    # Reload AppArmor to clear any cached ghost enforcement rules that cause Errcode 13
+    "${SUDO[@]}" systemctl reload apparmor.service 2>/dev/null || true
+
+    if ! "${SUDO[@]}" mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql >> "${LOG_FILE}" 2>&1; then
+      return 1
+    fi
+    return 0
+  fi
+  return 1
+}
+
+repair_mariadb_hard_reset() {
+  ui_blank
+  ui_line "╔══════════════════════════════════════════════════════════╗"
+  ui_line "║                 NUCLEAR RESET WARNING                   ║"
+  ui_line "╚══════════════════════════════════════════════════════════╝"
+  ui_blank
+  ui_warn "This will COMPLETELY UNINSTALL MariaDB and DELETE ALL DATABASES."
+  ui_warn "You will permanently lose any data currently in MariaDB."
+  ui_blank
+  ui_line "Type 'PURGE' to confirm, or press Enter to cancel:"
+  local confirm
+  read -r confirm
+  if [[ "${confirm}" != "PURGE" ]]; then
+    ui_line "Cancelled. No changes made."
+    return 1
+  fi
+
+  ui_info "Purging MariaDB..."
+  "${SUDO[@]}" systemctl stop mariadb 2>/dev/null || true
+  "${SUDO[@]}" apt-get purge -y mariadb-server mariadb-client mariadb-common mysql-common >> "${LOG_FILE}" 2>&1
+  "${SUDO[@]}" apt-get autoremove -y >> "${LOG_FILE}" 2>&1
+  
+  ui_info "Deleting database files..."
+  "${SUDO[@]}" rm -rf /var/lib/mysql /etc/mysql /var/lib/mariadb 2>/dev/null || true
+  
+  ui_ok "MariaDB purged successfully. Re-run the installer to install it fresh."
+  return 0
 }
 
 # ---- MariaDB configuration -------------------------------------------------
