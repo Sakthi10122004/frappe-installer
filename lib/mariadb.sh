@@ -32,6 +32,11 @@ mariadb_installed_version() {
 # ---- MariaDB installation --------------------------------------------------
 
 install_mariadb() {
+  if [[ "$(read_state "mariadb_bypassed")" == "true" ]]; then
+    ui_skip "MariaDB (Bypassed by user)"
+    return 0
+  fi
+
   local required_min="${FRAPPE_CONFIG[mariadb_min]}"
   local recommended="${FRAPPE_CONFIG[mariadb_recommended]}"
   local ver
@@ -156,31 +161,25 @@ diagnose_mariadb() {
   ui_line "If MariaDB refuses to install locally, you can choose a fallback:"
   ui_blank
   ui_line "  [1] Bypass Native MariaDB (I will connect Frappe to a remote or Docker DB)"
-  
-  if [[ "${ENVIRONMENT_TYPE:-prod}" == "local" ]]; then
-    ui_line "  [2] Nuclear Reset (Purge MariaDB entirely and reinstall)"
-  fi
+  ui_line "  [2] Nuclear Reset (Purge MariaDB entirely and reinstall)"
   ui_line "  [3] Exit and fix manually"
   ui_blank
 
-  local choice
-  choice="$(ui_select "Select" "3")"
+  local choice=""
+  read -r -p "  ${C_CYAN}?${C_RESET} Select [3]: " choice
+  choice="${choice:-3}"
 
   case "${choice}" in
     1)
       ui_ok "Bypassing local MariaDB installation."
       update_state "mariadb_ready" "true"
+      update_state "mariadb_bypassed" "true"
       ui_info "MariaDB stage marked as complete. Re-run the installer to continue."
       return 0
       ;;
     2)
-      if [[ "${ENVIRONMENT_TYPE:-prod}" == "local" ]]; then
-        repair_mariadb_hard_reset
-        return $?
-      else
-        fail_fatal "Invalid selection."
-        return 1
-      fi
+      repair_mariadb_hard_reset
+      return $?
       ;;
     3|*)
       ui_line "Exiting without making further changes."
@@ -207,49 +206,54 @@ check_mariadb_apparmor() {
 }
 
 repair_mariadb_apparmor() {
-  local apparmor_profile=""
-  if [[ -f "/etc/apparmor.d/usr.sbin.mysqld" ]]; then
-    apparmor_profile="/etc/apparmor.d/usr.sbin.mysqld"
-  elif [[ -f "/etc/apparmor.d/usr.sbin.mariadbd" ]]; then
-    apparmor_profile="/etc/apparmor.d/usr.sbin.mariadbd"
-  fi
+  # Create the disable directory since it might not exist on newer Ubuntu
+  "${SUDO[@]}" mkdir -p /etc/apparmor.d/disable
 
-  if [[ -n "${apparmor_profile}" ]]; then
-    # Create the disable directory since it might not exist on newer Ubuntu
-    "${SUDO[@]}" mkdir -p /etc/apparmor.d/disable
-    
-    # Symlink it
-    "${SUDO[@]}" ln -sf "${apparmor_profile}" /etc/apparmor.d/disable/ 2>/dev/null || true
-    
-    # Unload it from kernel
-    "${SUDO[@]}" apparmor_parser -R "${apparmor_profile}" 2>/dev/null || true
-    
-    # Fully reload AppArmor service to clear cached enforcement rules which cause Errcode 13
-    "${SUDO[@]}" systemctl reload apparmor.service 2>/dev/null || true
-    return 0
+  for profile in "/etc/apparmor.d/usr.sbin.mysqld" "/etc/apparmor.d/usr.sbin.mariadbd"; do
+    if [[ -f "${profile}" ]] && [[ ! -L "${profile}" ]]; then
+      "${SUDO[@]}" ln -sf "${profile}" /etc/apparmor.d/disable/ 2>/dev/null || true
+      "${SUDO[@]}" apparmor_parser -R "${profile}" 2>/dev/null || true
+    fi
+  done
+  
+  # Fully reload AppArmor service to clear cached enforcement rules
+  "${SUDO[@]}" systemctl reload apparmor.service 2>/dev/null || true
+  return 0
+}
+
+get_mariadb_datadir() {
+  local datadir=""
+  if command -v mariadbd >/dev/null 2>&1; then
+    datadir="$(mariadbd --help --verbose 2>/dev/null | grep "^datadir" | awk '{print $2}')"
+  elif command -v mysqld >/dev/null 2>&1; then
+    datadir="$(mysqld --help --verbose 2>/dev/null | grep "^datadir" | awk '{print $2}')"
   fi
-  return 1
+  echo "${datadir:-/var/lib/mysql}" | sed 's#/$##'
 }
 
 check_mariadb_datadir() {
-  # If /var/lib/mysql exists but /var/lib/mysql/mysql (the core DB) does not, it's corrupt
-  if [[ -d /var/lib/mysql ]] && ! "${SUDO[@]}" test -d /var/lib/mysql/mysql; then
+  local mdir
+  mdir="$(get_mariadb_datadir)"
+  # If datadir exists but datadir/mysql (the core DB) does not, it's corrupt
+  if [[ -d "${mdir}" ]] && ! "${SUDO[@]}" test -d "${mdir}/mysql"; then
     return 0
   fi
   return 1
 }
 
 initialize_fresh_mariadb() {
-  if ! "${SUDO[@]}" test -d /var/lib/mysql/mysql; then
-    "${SUDO[@]}" bash -c 'mv /var/lib/mysql "/var/lib/mysql.bak.$(date +%s)" 2>/dev/null || true'
-    "${SUDO[@]}" mkdir -p /var/lib/mysql
-    "${SUDO[@]}" chown mysql:mysql /var/lib/mysql
-    "${SUDO[@]}" chmod 700 /var/lib/mysql
+  local mdir
+  mdir="$(get_mariadb_datadir)"
+  if ! "${SUDO[@]}" test -d "${mdir}/mysql"; then
+    "${SUDO[@]}" bash -c "mv '${mdir}' '${mdir}.bak.\$(date +%s)' 2>/dev/null || true"
+    "${SUDO[@]}" mkdir -p "${mdir}"
+    "${SUDO[@]}" chown mysql:mysql "${mdir}"
+    "${SUDO[@]}" chmod 700 "${mdir}"
     
     # Reload AppArmor to clear any cached ghost enforcement rules that cause Errcode 13
     "${SUDO[@]}" systemctl reload apparmor.service 2>/dev/null || true
 
-    if ! "${SUDO[@]}" mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql >> "${LOG_FILE}" 2>&1; then
+    if ! "${SUDO[@]}" mariadb-install-db --user=mysql --basedir=/usr --datadir="${mdir}" >> "${LOG_FILE}" 2>&1; then
       return 1
     fi
     return 0
@@ -276,8 +280,8 @@ repair_mariadb_hard_reset() {
 
   ui_info "Purging MariaDB..."
   "${SUDO[@]}" systemctl stop mariadb 2>/dev/null || true
-  "${SUDO[@]}" apt-get purge -y mariadb-server mariadb-client mariadb-common mysql-common >> "${LOG_FILE}" 2>&1
-  "${SUDO[@]}" apt-get autoremove -y >> "${LOG_FILE}" 2>&1
+  "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get purge -y mariadb-server mariadb-client mariadb-common mysql-common >> "${LOG_FILE}" 2>&1
+  "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive apt-get autoremove -y >> "${LOG_FILE}" 2>&1
   
   ui_info "Deleting database files..."
   "${SUDO[@]}" rm -rf /var/lib/mysql /etc/mysql /var/lib/mariadb 2>/dev/null || true
@@ -289,6 +293,10 @@ repair_mariadb_hard_reset() {
 # ---- MariaDB configuration -------------------------------------------------
 
 configure_mariadb() {
+  if [[ "$(read_state "mariadb_bypassed")" == "true" ]]; then
+    return 0
+  fi
+
   local conf_dir="/etc/mysql/mariadb.conf.d"
   local conf_file="${conf_dir}/99-frappe.cnf"
   local marker="# Managed by frappe-installer — do not edit manually"
@@ -328,6 +336,10 @@ EOF
 # ---- Root authentication detection -----------------------------------------
 
 detect_mariadb_root_auth() {
+  if [[ "$(read_state "mariadb_bypassed")" == "true" ]]; then
+    return 0
+  fi
+
   # 1. A password recorded from a prior run.
   if [[ -n "${MARIADB_ROOT_PASSWORD}" ]] && \
      mariadb -u root -p"${MARIADB_ROOT_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1; then
