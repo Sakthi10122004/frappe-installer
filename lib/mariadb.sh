@@ -96,11 +96,34 @@ capture_mariadb_failure_evidence() {
 }
 
 print_mariadb_likely_cause() {
-  local cause
-  cause="$(tail -n 150 "${LOG_FILE}" 2>/dev/null | grep -iE "(Errcode: [0-9]+|Permission denied|Can't create/write|InnoDB:.*Error|Fatal error:|\[ERROR\])" | grep -v "journalctl" | tail -n 1 | awk '{$1=$1;print}')"
-  if [[ -n "${cause}" ]]; then
-    ui_line "  Likely cause: ${C_RED}${cause}${C_RESET}"
-  fi
+  local recent
+  recent="$(tail -n 200 "${LOG_FILE}" 2>/dev/null)"
+
+  # Prefer named, specific known signatures over a generic "last ERROR
+  # line wins" pick — that generic approach previously surfaced a bare
+  # "[ERROR] Aborting" instead of the actual reason one line above it.
+  # Ordered most-specific-first; first match wins.
+  local -a signatures=(
+    "Table '[a-zA-Z_.]*' doesn't exist.*privilege tables|Can't open and lock privilege tables"
+    "Errcode: [0-9]+.*Permission denied|Permission denied.*Errcode: [0-9]+"
+    "Can't create/write to file"
+    "InnoDB:.*[Cc]orrupt"
+    "Fatal error:"
+    "\[ERROR\]"
+  )
+
+  local pattern cause
+  for pattern in "${signatures[@]}"; do
+    cause="$(echo "${recent}" | grep -iE "${pattern}" | grep -v "journalctl" | tail -n 1 | awk '{$1=$1;print}')"
+    if [[ -n "${cause}" ]]; then
+      ui_line "  Likely cause: ${C_RED}${cause}${C_RESET}"
+      if echo "${pattern}" | grep -q "privilege tables"; then
+        ui_line "  ${C_DIM}(MariaDB's system tables were never initialized — this is what${C_RESET}"
+        ui_line "  ${C_DIM}'--doctor --component mariadb' → repair fixes, not a corruption issue)${C_RESET}"
+      fi
+      return 0
+    fi
+  done
 }
 
 diagnose_mariadb() {
