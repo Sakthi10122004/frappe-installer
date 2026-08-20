@@ -64,10 +64,12 @@ install_mariadb() {
     svc_enable mariadb
 
   # Start MariaDB (No auto-fixes!)
-  if ! svc_start mariadb 2>/dev/null; then
+  if ! svc_start mariadb >> "${LOG_FILE}" 2>&1; then
+    capture_mariadb_failure_evidence
     fail_fatal "MariaDB service could not be started."
     ui_blank
     ui_line "  ${C_RED}MariaDB could not be started.${C_RESET}"
+    print_mariadb_likely_cause
     ui_blank
     ui_line "  Please run the diagnostic tool to identify the issue:"
     ui_line "  ${C_CYAN}./${INSTALLER_NAME} --doctor --component mariadb${C_RESET}"
@@ -84,6 +86,22 @@ install_mariadb() {
 }
 
 # ---- MariaDB Diagnostics and Repair ------------------------------------------
+
+capture_mariadb_failure_evidence() {
+  { echo "---- journalctl -eu mariadb.service ----"; \
+    journalctl -eu mariadb.service --no-pager -n 60 2>/dev/null; \
+    echo "---- /var/log/mysql/error.log ----"; \
+    "${SUDO[@]}" tail -n 60 /var/log/mysql/error.log 2>/dev/null || true; } \
+    >> "${LOG_FILE}"
+}
+
+print_mariadb_likely_cause() {
+  local cause
+  cause="$(tail -n 150 "${LOG_FILE}" 2>/dev/null | grep -iE "(Errcode: [0-9]+|Permission denied|Can't create/write|InnoDB:.*Error|Fatal error:|\[ERROR\])" | grep -v "journalctl" | tail -n 1 | awk '{$1=$1;print}')"
+  if [[ -n "${cause}" ]]; then
+    ui_line "  Likely cause: ${C_RED}${cause}${C_RESET}"
+  fi
+}
 
 diagnose_mariadb() {
   ui_line "╔══════════════════════════════════════════════════════════╗"
@@ -138,18 +156,20 @@ diagnose_mariadb() {
 
       if [[ "${all_success}" == "true" ]]; then
         ui_ok "Repairs successful! Let's test the service..."
-        if svc_start mariadb 2>/dev/null; then
+        if svc_start mariadb >> "${LOG_FILE}" 2>&1; then
            ui_ok "MariaDB started successfully! You can now re-run the installer."
            return 0
         else
+           capture_mariadb_failure_evidence
            ui_warn "MariaDB still failed to start after repairs."
+           print_mariadb_likely_cause
         fi
       fi
     else
       ui_line "Skipping repairs."
     fi
   else
-    ui_line "No common causes detected. Please check journalctl -xeu mariadb.service"
+    ui_line "No common causes detected. Please check journalctl -eu mariadb.service"
   fi
 
   # ---- FALLBACK MENU ----
@@ -189,19 +209,12 @@ diagnose_mariadb() {
 }
 
 check_mariadb_apparmor() {
-  # If the profile exists and is not a symlink to disable/, AppArmor will enforce it
-  if [[ -f "/etc/apparmor.d/usr.sbin.mysqld" ]] && [[ ! -L "/etc/apparmor.d/usr.sbin.mysqld" ]]; then
+  if journalctl -k -n 200 2>/dev/null | grep -q 'apparmor="DENIED".*\(mariadbd\|mysqld\)'; then
     return 0
   fi
-  if [[ -f "/etc/apparmor.d/usr.sbin.mariadbd" ]] && [[ ! -L "/etc/apparmor.d/usr.sbin.mariadbd" ]]; then
+  if journalctl -b -n 200 2>/dev/null | grep -q 'apparmor="DENIED".*\(mariadbd\|mysqld\)'; then
     return 0
   fi
-
-  # Fallback to checking kernel logs (no sudo to prevent fingerprint prompt hiding)
-  if journalctl -k -n 100 2>/dev/null | grep -q "apparmor=.*DENIED.*\(mariadbd\|mysqld\)"; then
-    return 0
-  fi
-  
   return 1
 }
 
