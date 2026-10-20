@@ -35,19 +35,21 @@ on_error() {
 # ---- Trap: INT/TERM (Ctrl+C, kill) -----------------------------------------
 
 on_interrupt() {
+  # A second Ctrl+C while saving must not cut the save short.
+  trap '' INT TERM
   spinner_stop fail "" >/dev/null 2>&1 || true
+  if [[ -t 0 ]]; then stty echo 2>/dev/null || true; fi
   [[ -t 1 ]] && tput cnorm 2>/dev/null || true
 
-  ui_blank
-  ui_warn "Interrupted during stage: ${CURRENT_STAGE:-pre-flight}"
-
-  # Save state if we have a state file
-  if declare -F save_state >/dev/null 2>&1; then
+  # Save where we stopped, for the "continue where you left off" offer.
+  if declare -F save_state >/dev/null 2>&1 && [[ -n "${STATE_FILE:-}" ]]; then
     save_state 2>/dev/null || true
+    update_state "interrupted" "true" 2>/dev/null || true
+    update_state "last_stage" "${CURRENT_STAGE:-}" 2>/dev/null || true
   fi
+  log_only "INTERRUPTED during stage: ${CURRENT_STAGE:-pre-flight}"
 
-  ui_warn "Installation state has been saved. Re-run ./${INSTALLER_NAME} to resume."
-  ui_warn "No data was deleted. Completed steps are detected and skipped."
+  ui_interrupt_banner
   exit 130
 }
 
@@ -59,6 +61,10 @@ on_exit() {
   fi
   if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
     kill "${SUDO_KEEPALIVE_PID}" 2>/dev/null || true
+  fi
+  # A `bench start` launched by the HTTP health check.
+  if declare -F _stop_probe_server >/dev/null 2>&1; then
+    _stop_probe_server 2>/dev/null || true
   fi
   # Temporary bench Redis servers started for migrate/build.
   if declare -F bench_redis_stop >/dev/null 2>&1; then

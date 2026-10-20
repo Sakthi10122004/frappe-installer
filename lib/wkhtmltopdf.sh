@@ -23,18 +23,17 @@ install_wkhtmltopdf() {
     fi
   fi
 
-  # Determine the correct download URL based on architecture and OS
-  local deb_url=""
-  local deb_file="wkhtmltox.deb"
-
+  # Jammy builds work on Ubuntu 22.04+ and Debian 12+. (There is no
+  # bookworm arm64 build; the previous URL for it did not exist.)
+  local deb_url="" deb_sha=""
   case "${ARCH}" in
     x86_64)
-      # Use the jammy (22.04) build as it works on 24.04+ as well
-      deb_url="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.jammy_amd64.deb"
+      deb_url="${WKHTMLTOX_URL_BASE}/wkhtmltox_0.12.6.1-2.jammy_amd64.deb"
+      deb_sha="${WKHTMLTOX_SHA256_AMD64}"
       ;;
     aarch64)
-      # ARM64 builds are limited; try the Debian bookworm build
-      deb_url="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.bookworm_arm64.deb"
+      deb_url="${WKHTMLTOX_URL_BASE}/wkhtmltox_0.12.6.1-2.jammy_arm64.deb"
+      deb_sha="${WKHTMLTOX_SHA256_ARM64}"
       ;;
   esac
 
@@ -47,12 +46,12 @@ install_wkhtmltopdf() {
   # Install required dependencies first
   apt_install_missing fontconfig libxrender1 xfonts-75dpi xfonts-base 2>/dev/null || true
 
-  # Download and install
+  # Download, verify checksum, then install
   local tmp_deb
   tmp_deb="$(mktemp --suffix=.deb)"
 
-  if ! curl -fsSL -o "${tmp_deb}" "${deb_url}" 2>/dev/null; then
-    fail_warning "wkhtmltopdf: download failed."
+  if ! download_verified "${deb_url}" "${deb_sha}" "${tmp_deb}" >> "${LOG_FILE}" 2>&1; then
+    fail_warning "wkhtmltopdf: download failed or checksum did not match (see log)."
     ui_line "  PDF generation will not be available."
     rm -f "${tmp_deb}"
     return 0

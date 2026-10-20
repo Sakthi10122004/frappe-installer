@@ -63,6 +63,11 @@ write_credentials_file() {
   mkdir -p "${cred_dir}"
   CREDENTIALS_FILE="${cred_dir}/${SITE_NAME}.txt"
 
+  local admin_display="${ADMIN_PASSWORD}"
+  if [[ -z "${admin_display}" ]]; then
+    admin_display="(unchanged — this site existed before; reset with: bench --site ${SITE_NAME} set-admin-password)"
+  fi
+
   local db_server="local (root login unchanged — use: sudo mariadb -u root)"
   if [[ -n "${DB_HOST}" ]]; then
     db_server="${DB_HOST}:${DB_PORT:-3306} (external)"
@@ -97,7 +102,7 @@ Username:
   Administrator
 
 Password:
-  ${ADMIN_PASSWORD}
+  ${admin_display}
 
 ------------------------------------------------------------
 MARIADB ADMIN

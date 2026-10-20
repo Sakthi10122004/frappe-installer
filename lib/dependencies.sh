@@ -89,6 +89,17 @@ install_mariadb_dev_lib() {
   fi
 }
 
+# ---- Interrupted package installs -------------------------------------------
+# Ctrl+C during apt can leave packages half-configured, and every later apt
+# call then fails until `dpkg --configure -a` runs. Finish that first.
+
+repair_interrupted_dpkg() {
+  if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
+    run_step "Finishing an interrupted package installation" "dpkg --configure -a" \
+      "${SUDO[@]}" env DEBIAN_FRONTEND=noninteractive dpkg --configure -a
+  fi
+}
+
 # ---- Dependency resolution orchestrator ------------------------------------
 # Called after the Frappe version is selected. Detects what's already installed,
 # determines what needs to be installed/upgraded, and installs in order.
@@ -97,6 +108,7 @@ resolve_dependencies() {
   ui_info "Resolving dependencies for Frappe ${SELECTED_FRAPPE_VERSION}..."
   log_only "Dependency resolution for Frappe ${SELECTED_FRAPPE_VERSION}"
 
+  repair_interrupted_dpkg
   install_base_packages
   install_mariadb_dev_lib
 

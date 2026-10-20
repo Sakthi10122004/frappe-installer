@@ -22,7 +22,12 @@ ui_blank() { echo ""; }
 # ---- Rich-mode helpers ------------------------------------------------------
 
 _ui_cols() {
-  local cols="${COLUMNS:-}"
+  local cols="${COLUMNS:-}" size
+  # Ask the terminal itself: `tput cols` inside $(...) can't see it and
+  # silently falls back to 80, which made long spinner lines wrap.
+  if [[ -z "${cols}" ]] && size="$(stty size < /dev/tty 2>/dev/null)"; then
+    cols="${size#* }"
+  fi
   [[ -z "${cols}" ]] && cols="$(tput cols 2>/dev/null || echo 80)"
   [[ "${cols}" =~ ^[0-9]+$ ]] || cols=80
   echo "${cols}"
@@ -127,6 +132,23 @@ _ui_fmt_duration() {
   else
     printf '%dh %02dm' $(( s / 3600 )) $(( s % 3600 / 60 ))
   fi
+}
+
+# ui_ago EPOCH — "just now", "12 min ago", "3 h ago", "2 days ago".
+ui_ago() {
+  local now d
+  _ui_now now
+  d=$(( now - $1 ))
+  if [[ "${d}" -lt 60 ]]; then echo "just now"
+  elif [[ "${d}" -lt 3600 ]]; then echo "$(( d / 60 )) min ago"
+  elif [[ "${d}" -lt 86400 ]]; then echo "$(( d / 3600 )) h ago"
+  else echo "$(( d / 86400 )) days ago"
+  fi
+}
+
+# ui_short_path PATH — PATH with $HOME shown as ~.
+ui_short_path() {
+  echo "${1/#${HOME}/\~}"
 }
 
 _ui_now() {
@@ -252,6 +274,9 @@ ui_stage() {
   CURRENT_STAGE="$1"
   UI_STAGE_NAMES+=("$1")
   _ui_now UI_STAGE_STARTED_AT
+  if declare -F state_note_stage >/dev/null; then
+    state_note_stage "$1"
+  fi
 
   if [[ -n "${LOG_FILE:-}" && -f "${LOG_FILE:-}" ]]; then
     echo "" >> "${LOG_FILE}"
@@ -359,6 +384,19 @@ ui_stage_timeline() {
 
 SPINNER_STARTED_AT=""
 
+# _ui_log_tail_line FILE — the newest meaningful log line, as plain text.
+# Progress bars (Frappe's "Updating DocTypes … 45%") redraw with \r, so \r
+# counts as a line break and only the newest update is kept; color codes
+# and control characters are stripped so the line can be measured and cut.
+_ui_log_tail_line() {
+  local line
+  line="$(tail -c 4096 "$1" 2>/dev/null | tr '\r\t' '\n ' \
+    | sed $'s/\033\\[[0-9;?]*[A-Za-z]//g' | tr -d '\000-\010\013-\037\177' \
+    | grep -vE '^(--|==|\+|[[:space:]]*$)' | tail -n 1)"
+  line="${line#"${line%%[![:space:]]*}"}"
+  printf '%s' "${line%"${line##*[![:space:]]}"}"
+}
+
 spinner_start() {
   local msg="$1"
   _ui_now SPINNER_STARTED_AT
@@ -389,7 +427,7 @@ spinner_start() {
 
       # Tail of the log, refreshed every half second.
       if [[ $(( i % 5 )) -eq 0 && -n "${LOG_FILE:-}" && -f "${LOG_FILE:-}" ]]; then
-        live="$(tail -n 8 "${LOG_FILE}" 2>/dev/null | grep -v "^--" | grep -v "^==" | grep -v "^\+" | grep -v "^$" | tail -n 1 | tr -d '\r' | xargs 2>/dev/null)"
+        live="$(_ui_log_tail_line "${LOG_FILE}")"
       fi
 
       printf -v now '%(%s)T' -1
@@ -397,14 +435,16 @@ spinner_start() {
       printf -v timer '%d:%02d' $(( el / 60 )) $(( el % 60 ))
 
       # Keep everything on one line: a wrapped line breaks the \r redraw.
-      room=$(( cols - ${#msg} - 26 ))
+      local shown="${msg}"
+      if [[ $(( ${#shown} + 24 )) -gt "${cols}" ]]; then shown="${shown:0:cols-25}…"; fi
+      room=$(( cols - ${#shown} - 26 ))
       text=""
       if [[ "${room}" -gt 12 && -n "${live}" ]]; then
         text="${live}"
         if [[ "${#text}" -gt "${room}" ]]; then text="${text:0:room-1}…"; fi
       fi
 
-      printf '\r\033[K  %s%s %s%s %s %s%s%s' "${comet}" "${C_RESET}" "${C_BOLD}" "${msg}" "${C_RESET}" \
+      printf '\r\033[K  %s%s %s%s %s %s%s%s' "${comet}" "${C_RESET}" "${C_BOLD}" "${shown}" "${C_RESET}" \
         "${C_DIM}" "${timer}${text:+  │ ${text}}" "${C_RESET}"
       i=$((i + 1))
       sleep 0.08
@@ -743,17 +783,19 @@ _ui_card_select() {
       if [[ $(( ${#part} + 7 )) -gt "${w}" ]]; then w=$(( ${#part} + 7 )); fi
     done
   done
-  local cols horizontal=1
+  # Grid: as many cards per row as fit (each card is w+2 wide, 2 apart).
+  local cols per_row grid_rows
   cols="$(_ui_cols)"
   if [[ "${w}" -gt 36 ]]; then w=36; fi
-  if [[ $(( 2 + m * (w + 2) + (m - 1) * 2 )) -gt "${cols}" ]]; then
-    horizontal=0
-    if [[ "${w}" -gt $(( cols - 6 )) ]]; then w=$(( cols - 6 )); fi
-  fi
+  if [[ "${w}" -gt $(( cols - 6 )) ]]; then w=$(( cols - 6 )); fi
+  per_row=$(( (cols - 2 + 2) / (w + 4) ))
+  if [[ "${per_row}" -lt 1 ]]; then per_row=1; fi
+  if [[ "${per_row}" -gt "${m}" ]]; then per_row="${m}"; fi
+  grid_rows=$(( (m + per_row - 1) / per_row ))
 
-  local hint="←/→ choose · enter select · 1-${n} jump"
+  local hint="arrows move · enter select · 1-${n} jump"
   [[ "${exit_idx}" -gt 0 ]] && hint+=" · q quit"
-  local frame_h=$(( (horizontal == 1 ? h : m * h) + 1 ))
+  local frame_h=$(( grid_rows * h + 1 ))
 
   {
     ui_blank
@@ -775,18 +817,20 @@ _ui_card_select() {
     done
     local out="" r line
     if [[ "${drawn}" -eq 1 ]]; then out+=$'\033['"${frame_h}A"; fi
-    if [[ "${horizontal}" -eq 1 ]]; then
+    local gr first last
+    for (( gr = 0; gr < grid_rows; gr++ )); do
+      first=$(( gr * per_row ))
+      last=$(( first + per_row - 1 ))
+      if [[ "${last}" -ge "${m}" ]]; then last=$(( m - 1 )); fi
       for (( r = 0; r < h; r++ )); do
         line="  "
-        for (( k = 0; k < m; k++ )); do
+        for (( k = first; k <= last; k++ )); do
           line+="${all[k * h + r]}"
-          if [[ "${k}" -lt $(( m - 1 )) ]]; then line+="  "; fi
+          if [[ "${k}" -lt "${last}" ]]; then line+="  "; fi
         done
         out+=$'\r\033[K'"${line}"$'\n'
       done
-    else
-      for line in "${all[@]}"; do out+=$'\r\033[K'"  ${line}"$'\n'; done
-    fi
+    done
     out+=$'\r\033[K'"    ${C_DIM}${hint}${C_RESET}"$'\n'
     printf '%s' "${out}" >&2
     drawn=1
@@ -812,8 +856,10 @@ _ui_card_select() {
       $'\x1b')
         IFS= read -rsn2 -t 0.03 rest || rest=""
         case "${rest}" in
-          "[A"|"[D"|"OA"|"OD") cur=$(( (cur - 1 + m) % m )) ;;
-          "[B"|"[C"|"OB"|"OC") cur=$(( (cur + 1) % m )) ;;
+          "[D"|"OD") cur=$(( (cur - 1 + m) % m )) ;;
+          "[C"|"OC") cur=$(( (cur + 1) % m )) ;;
+          "[A"|"OA") cur=$(( per_row < m ? (cur - per_row + m) % m : (cur - 1 + m) % m )) ;;
+          "[B"|"OB") cur=$(( per_row < m ? (cur + per_row) % m : (cur + 1) % m )) ;;
           "")
             if [[ "${exit_idx}" -gt 0 ]]; then chosen=-2; break; fi
             ;;
@@ -909,6 +955,52 @@ ui_success_banner() {
     "" \
     "${C_DIM}Installed and verified in ${took}${C_RESET}" \
     ""
+}
+
+# ---- Interrupted (Ctrl+C) -----------------------------------------------------
+
+ui_interrupt_banner() {
+  local now took done_stages pct bar="" i width=24 filled
+  _ui_now now
+  took="$(_ui_fmt_duration $(( now - UI_INSTALL_STARTED_AT )))"
+  done_stages=$(( CURRENT_STAGE_NUM > 0 ? CURRENT_STAGE_NUM - 1 : 0 ))
+  pct=$(( done_stages * 100 / TOTAL_STAGES ))
+  filled=$(( done_stages * width / TOTAL_STAGES ))
+  for (( i = 0; i < width; i++ )); do
+    if [[ "${i}" -lt "${filled}" ]]; then
+      _ui_grad_at "${i}" "${width}"; bar+="${UI_GRAD}━"
+    elif [[ "${i}" -eq "${filled}" ]]; then
+      bar+="${C_YELLOW}${C_BOLD}╸"
+    else
+      bar+="${C_DIM}─"
+    fi
+  done
+  bar+="${C_RESET}"
+
+  local stage_line
+  if [[ "${CURRENT_STAGE_NUM}" -gt 0 ]]; then
+    stage_line="${C_DIM}Stopped during ${C_RESET}${C_BOLD}${CURRENT_STAGE}${C_RESET} ${C_DIM}(step ${CURRENT_STAGE_NUM}/${TOTAL_STAGES})${C_RESET}"
+  else
+    stage_line="${C_DIM}Stopped before ${C_RESET}${C_BOLD}any changes were made${C_RESET}"
+  fi
+
+  printf '\r\033[K'
+  ui_blank
+  ui_box "${C_YELLOW}" \
+    "" \
+    "${C_BOLD}${C_YELLOW}⏸  INSTALLATION PAUSED${C_RESET}" \
+    "" \
+    "${stage_line}" \
+    "${C_DIM}Progress       ${C_RESET}${bar} ${C_BOLD}${pct}%${C_RESET}" \
+    "${C_DIM}Ran for        ${C_RESET}${took}" \
+    "" \
+    "${C_GREEN}✔${C_RESET} Progress saved — nothing was deleted or rolled back" \
+    "${C_GREEN}✔${C_RESET} Half-finished package installs are repaired on resume" \
+    "" \
+    "${C_CYAN}↻${C_RESET} Resume any time:  ${C_BOLD}./${INSTALLER_NAME}${C_RESET}" \
+    "  ${C_DIM}it will offer to continue exactly where you stopped${C_RESET}" \
+    ""
+  ui_blank
 }
 
 # ---- Failure banner ---------------------------------------------------------

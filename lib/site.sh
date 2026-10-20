@@ -56,6 +56,10 @@ prompt_admin_password() {
   if [[ -n "${ADMIN_PASSWORD}" ]]; then
     return 0  # Already set (from credentials file or CLI)
   fi
+  # Only a new site needs one; an existing site keeps its own password.
+  if [[ -d "${BENCH_DIR}/sites/${SITE_NAME}" ]]; then
+    return 0
+  fi
 
   if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
     ADMIN_PASSWORD="$(gen_secret 20)"
@@ -96,32 +100,44 @@ prompt_admin_password() {
 
 # ---- Verify site database connection ----------------------------------------
 
+# _read_site_db_config SITE — set FRAPPE_DB_NAME/USER/PASSWORD (and the
+# site's own db_host/db_port, if any) from sites/SITE/site_config.json.
+# Sites often have no "db_user" key: Frappe then uses the database name.
+_read_site_db_config() {
+  local config_file="sites/$1/site_config.json" values
+  [[ -f "${config_file}" ]] || return 1
+  values="$(python3 - "${config_file}" <<'PYEOF'
+import json, sys
+c = json.load(open(sys.argv[1]))
+name = c.get("db_name", "")
+print(name)
+print(c.get("db_user") or name)
+print(c.get("db_password", ""))
+print(c.get("db_host", ""))
+print(c.get("db_port", ""))
+PYEOF
+)" || return 1
+  {
+    IFS= read -r FRAPPE_DB_NAME
+    IFS= read -r FRAPPE_DB_USER
+    IFS= read -r FRAPPE_DB_PASSWORD
+    IFS= read -r SITE_DB_HOST
+    IFS= read -r SITE_DB_PORT
+  } <<< "${values}"
+  [[ -n "${FRAPPE_DB_NAME}" && -n "${FRAPPE_DB_PASSWORD}" ]]
+}
+
 _verify_site_db_connection() {
   local site="$1"
-  local config_file="sites/${site}/site_config.json"
+  _read_site_db_config "${site}" || return 1
 
-  if [[ ! -f "${config_file}" ]]; then
-    return 1
-  fi
-
-  local db_user db_password db_name
-  db_user="$(python3 -c "import json; print(json.load(open('${config_file}')).get('db_user',''))" 2>/dev/null)"
-  db_password="$(python3 -c "import json; print(json.load(open('${config_file}')).get('db_password',''))" 2>/dev/null)"
-  db_name="$(python3 -c "import json; print(json.load(open('${config_file}')).get('db_name',''))" 2>/dev/null)"
-
-  if [[ -z "${db_user}" ]] || [[ -z "${db_password}" ]]; then
-    return 1
-  fi
-
+  local host="${SITE_DB_HOST:-${DB_HOST}}" port="${SITE_DB_PORT:-${DB_PORT}}"
   local -a host_args=()
-  [[ -n "${DB_HOST}" ]] && host_args=(-h "${DB_HOST}" -P "${DB_PORT:-3306}")
+  if [[ -n "${host}" ]]; then host_args=(-h "${host}" -P "${port:-3306}"); fi
 
-  # Try connecting with the site's stored credentials
-  if mariadb "${host_args[@]}" -u "${db_user}" -p"${db_password}" -e "USE \`${db_name}\`;" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  return 1
+  # Password via the environment, not argv, so it never shows up in `ps`.
+  MYSQL_PWD="${FRAPPE_DB_PASSWORD}" mariadb "${host_args[@]}" -u "${FRAPPE_DB_USER}" \
+    -e "USE \`${FRAPPE_DB_NAME}\`;" >/dev/null 2>&1
 }
 
 # ---- Create site ------------------------------------------------------------
@@ -137,11 +153,14 @@ create_site() {
     ui_warn "Site ${SITE_NAME} already exists."
 
     if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+      _read_site_db_config "${SITE_NAME}" || true
       ui_skip "Site ${SITE_NAME}"
       return 0
     fi
 
-    local choice
+    local choice=1
+    # Keep/update/upgrade chose this bench on purpose: use its site.
+    [[ "${INSTALL_MODE}" =~ ^(keep|update|upgrade)$ ]] || \
     choice="$(ui_select "Site ${SITE_NAME} already exists. What now?" 1 \
       "Use existing site|Keep it and its data|Checks the DB connection" \
       "New site|Pick another name|Existing site untouched" \
@@ -191,11 +210,9 @@ create_site() {
     esac
   fi
 
-  # Generate database credentials
-  FRAPPE_DB_NAME="${FRAPPE_DB_NAME:-_$(echo -n "${SITE_NAME}" | md5sum | cut -c1-10)}"
-  FRAPPE_DB_USER="${FRAPPE_DB_USER:-${FRAPPE_DB_NAME}}"
-  FRAPPE_DB_PASSWORD="${FRAPPE_DB_PASSWORD:-$(gen_secret 24)}"
-
+  # Database name and password are left to Frappe (random, unique), so a
+  # recreated site never collides with an old database, and the DB password
+  # never appears on a command line. They are read back afterwards.
   local -a db_args=(
     --mariadb-root-username "${MARIADB_ADMIN_USER}"
     --mariadb-root-password "${MARIADB_ADMIN_PASSWORD}"
@@ -212,14 +229,14 @@ create_site() {
   run_step "Creating site ${SITE_NAME}" "bench new-site" \
     bench new-site "${SITE_NAME}" \
       "${db_args[@]}" \
-      --db-name "${FRAPPE_DB_NAME}" \
-      --db-password "${FRAPPE_DB_PASSWORD}" \
       --admin-password "${ADMIN_PASSWORD}"
 
   [[ -d "sites/${SITE_NAME}" ]] || {
     fail_fatal "Site directory not found after new-site"
     return 1
   }
+  _read_site_db_config "${SITE_NAME}" || true
+  SITE_JUST_CREATED=1
 
   ui_ok "Site ${SITE_NAME} created"
   update_state "site_created" "true"
@@ -252,6 +269,14 @@ run_migrations() {
   export PATH="${HOME}/.local/bin:${PATH}"
   nvm_load
   nvm use "${FRAPPE_CONFIG[node]}" >/dev/null 2>&1 || true
+
+  # `bench new-site` already installs every DocType and marks all patches as
+  # applied; migrating again straight after only repeats that work (minutes).
+  if [[ "${SITE_JUST_CREATED}" -eq 1 ]]; then
+    ui_skip "Migrations (new site is already up to date)"
+    update_state "migration_complete" "true"
+    return 0
+  fi
 
   # Ensure socketio port is free or auto-configured to avoid EADDRINUSE crashes
   ensure_free_socketio_port
@@ -363,6 +388,7 @@ _restore_bench_redis_config() {
 show_installation_summary() {
   ui_summary_header "INSTALLATION SUMMARY"
   ui_blank
+  ui_summary_field "Action" "$(install_mode_label)"
   ui_summary_field "Framework" "Frappe ${SELECTED_FRAPPE_VERSION}"
   ui_summary_field "Bench" "${BENCH_DIR}"
   ui_summary_field "Site" "${SITE_NAME}"

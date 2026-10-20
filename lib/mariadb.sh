@@ -525,6 +525,20 @@ default-character-set = utf8mb4
 EOF
 )
 
+  # Local setups: flush the InnoDB log to disk about once a second instead of
+  # on every commit. Site creation makes thousands of small commits, so this
+  # makes it several times faster. Trade-off: if the whole machine crashes or
+  # loses power, up to ~1s of recent writes can be lost (a MariaDB restart or
+  # crash alone loses nothing). Production keeps full per-commit durability.
+  if [[ "${ENVIRONMENT_TYPE:-local}" == "local" ]]; then
+    desired+=$'\n\n'"$(cat <<'EOF'
+# Local development speed-up (set because --env local was chosen)
+[mysqld]
+innodb_flush_log_at_trx_commit = 2
+EOF
+)"
+  fi
+
   if [[ -f "${conf_file}" ]] && grep -qF "${marker}" "${conf_file}" && \
      diff -q <(echo "${desired}") "${conf_file}" >/dev/null 2>&1; then
     ui_skip "MariaDB Frappe configuration (${conf_file})"
@@ -624,6 +638,7 @@ detect_mariadb_admin_auth() {
   # 1. Admin credentials saved by a previous run.
   if [[ -f "${MARIADB_ADMIN_CNF}" ]] && _mariadb_cnf_works "${MARIADB_ADMIN_CNF}"; then
     _use_admin_cnf "${MARIADB_ADMIN_CNF}"
+    _forget_legacy_root_password
     ui_skip "MariaDB admin access (${MARIADB_ADMIN_USER}, saved in ${MARIADB_ADMIN_CNF})"
     return 0
   fi
@@ -696,6 +711,16 @@ detect_mariadb_admin_auth() {
   esac
 }
 
+# _forget_legacy_root_password — older versions kept the MariaDB root
+# password in plain text in the state file. Once admin access works without
+# it, drop that copy.
+_forget_legacy_root_password() {
+  if [[ -n "$(read_state "mariadb_root_password")" ]]; then
+    update_state "mariadb_root_password" ""
+    log_only "Removed the old plain-text MariaDB root password from the state file."
+  fi
+}
+
 # _create_installer_admin_user — create (or re-key) the installer-owned admin
 # account via `sudo mariadb`. Only this account is ever changed.
 _create_installer_admin_user() {
@@ -719,6 +744,7 @@ _create_installer_admin_user() {
     return 1
   fi
   _use_admin_cnf "${MARIADB_ADMIN_CNF}"
+  _forget_legacy_root_password
   ui_ok "MariaDB admin account '${user}' ready (root login unchanged)"
 }
 

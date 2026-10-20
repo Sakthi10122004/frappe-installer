@@ -31,6 +31,7 @@ source "${SCRIPT_DIR}/lib/constants.sh"
 source "${SCRIPT_DIR}/lib/ui.sh"
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/errors.sh"
+source "${SCRIPT_DIR}/lib/download.sh"
 source "${SCRIPT_DIR}/lib/os.sh"
 source "${SCRIPT_DIR}/lib/state.sh"
 source "${SCRIPT_DIR}/lib/dependencies.sh"
@@ -46,6 +47,7 @@ source "${SCRIPT_DIR}/lib/verification.sh"
 source "${SCRIPT_DIR}/lib/recovery.sh"
 source "${SCRIPT_DIR}/lib/diagnostics.sh"
 source "${SCRIPT_DIR}/lib/apps.sh"
+source "${SCRIPT_DIR}/lib/lifecycle.sh"
 
 # ============================================================================
 # ARGUMENT PARSING
@@ -189,11 +191,14 @@ main_install() {
   ui_stage "Existing environment detection"
   registry_init
   discover_environments
+  resume_wizard                  # unfinished install? continue / start fresh
+  existing_environment_wizard    # Frappe found? keep / update / upgrade / downgrade
 
   # ---- Stage 3: Version & Environment selection -----------------------------
   ui_stage "Environment setup"
   select_environment_type
   select_frappe_version
+  choose_alongside_path
   check_os_compatibility "${SELECTED_FRAPPE_VERSION}"
   check_disk_space "${INSTALL_PATH}"
 
@@ -204,6 +209,7 @@ main_install() {
   # Site wizard (get site name + admin password)
   site_wizard
   prompt_admin_password
+  save_state
 
   # Show summary and confirm
   show_installation_summary
@@ -236,6 +242,10 @@ main_install() {
   ui_stage "Bench preparation"
   install_bench_cli
   init_bench
+  case "${INSTALL_MODE}" in
+    update)  update_bench ;;
+    upgrade) upgrade_bench ;;
+  esac
 
   # ---- Stage 9: Site creation -----------------------------------------------
   ui_stage "Site creation"

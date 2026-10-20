@@ -30,8 +30,21 @@ DEFAULT_INSTALL_PATH_16="${HOME}/frappe16"
 DEFAULT_SITE_NAME="frappe.local"
 BENCH_SUBDIR="frappe-bench"
 
-# ---- NVM version (pinned) --------------------------------------------------
+# ---- Pinned downloads (see lib/download.sh) ---------------------------------
+# NVM: cloned at this tag and verified against the tag's commit.
 NVM_VERSION="v0.40.3"
+NVM_COMMIT="977563e97ddc66facf3a8e31c6cff01d236f09bd"
+
+# uv: release tarball; SHA-256 values are GitHub's published asset digests.
+UV_VERSION="0.13.4"
+UV_SHA256_X86_64="2b428396f12572d4429cf210ca234dd599a33b3af0958a4d5ed569d63e3f344f"
+UV_SHA256_AARCH64="1ae72b4718729e2ccc4f1ae2c6d1e531ca8467800e0546e9130b3886023a60ab"
+
+# wkhtmltopdf 0.12.6.1-2 (jammy builds; also used on newer Ubuntu/Debian).
+# Upstream publishes no checksums for these; pinned from the release assets.
+WKHTMLTOX_URL_BASE="https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2"
+WKHTMLTOX_SHA256_AMD64="ee88d74834bdec650f7432c7d3ef1c981e42ae7a762a75a01f7f5da59abc18d5"
+WKHTMLTOX_SHA256_ARM64="17167a87bf59ea9a24cc0e8321ea27fbb17d6a915f445c52b8909f2539b673c1"
 
 # ---- Terminal colors --------------------------------------------------------
 # Disabled for pipes/files, TERM=dumb, and when NO_COLOR is set (no-color.org).
@@ -149,9 +162,19 @@ NVM_DIR_PATH="${HOME}/.nvm"
 FRAPPE_DB_NAME=""
 FRAPPE_DB_USER=""
 FRAPPE_DB_PASSWORD=""
+SITE_DB_HOST=""
+SITE_DB_PORT=""
+SITE_JUST_CREATED=0
 ADMIN_PASSWORD=""
 CREDENTIALS_FILE=""
 VERIFY_FAILURES=0
+
+# ---- Lifecycle (see lib/lifecycle.sh) -----------------------------------------
+# INSTALL_MODE: fresh | keep | update | upgrade | alongside
+INSTALL_MODE="fresh"
+UPGRADE_FROM_VERSION=""
+RESUME_DECIDED=0
+DISCOVERED_BENCHES=()
 
 # ---- sudo command array (replaced with empty array when running as root) ----
 SUDO=(sudo)
@@ -160,7 +183,8 @@ SUDO=(sudo)
 # Output goes to the log file, so an interactive prompt (debconf, needrestart)
 # would hang invisibly behind the spinner. env is used because sudo strips
 # the caller's environment.
-APT_GET=(env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get)
+# DPkg::Lock::Timeout: wait for unattended-upgrades etc. instead of failing.
+APT_GET=(env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -o DPkg::Lock::Timeout=300)
 
 # ---- Minimum disk space (MB) for installation ------------------------------
 MIN_DISK_SPACE_MB=5000

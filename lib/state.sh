@@ -125,6 +125,34 @@ detect_bench_frappe_version() {
   echo "unknown"
 }
 
+# bench_site_names BENCH — space-separated site names in a bench.
+bench_site_names() {
+  local f names=""
+  for f in "$1"/sites/*/site_config.json; do
+    [[ -f "${f}" ]] || continue
+    f="${f%/site_config.json}"
+    names+="${names:+ }${f##*/}"
+  done
+  echo "${names}"
+}
+
+# bench_default_site BENCH — the bench's default site, else its first site.
+bench_default_site() {
+  local bench="$1" site=""
+  if [[ -s "${bench}/sites/currentsite.txt" ]]; then
+    site="$(head -n1 "${bench}/sites/currentsite.txt" | tr -d '[:space:]')"
+  fi
+  if [[ -z "${site}" && -f "${bench}/sites/common_site_config.json" ]]; then
+    site="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("default_site",""))' \
+      "${bench}/sites/common_site_config.json" 2>/dev/null || true)"
+  fi
+  if [[ -z "${site}" || ! -d "${bench}/sites/${site}" ]]; then
+    site="$(bench_site_names "${bench}")"
+    site="${site%% *}"
+  fi
+  echo "${site}"
+}
+
 # ---- Environment discovery --------------------------------------------------
 # Uses multiple mechanisms per BRD Section 4:
 # 1. Registry, 2. Known paths, 3. bench executable
@@ -161,17 +189,20 @@ except Exception:
   fi
 
   # Validate and report
-  local found_any=0
-  for path in "${!discovered[@]}"; do
+  DISCOVERED_BENCHES=()
+  local path
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
     if is_valid_bench_dir "${path}"; then
-      local ver
+      local ver sites
       ver="$(detect_bench_frappe_version "${path}")"
-      ui_ok "Frappe ${ver} — ${path}"
-      found_any=1
+      sites="$(bench_site_names "${path}")"
+      ui_ok "Frappe ${ver} — ${path}${sites:+ ${C_DIM}(sites: ${sites// /, })${C_RESET}}"
+      DISCOVERED_BENCHES+=("${path}")
     fi
-  done
+  done < <(printf '%s\n' "${!discovered[@]}" | sort)
 
-  if [[ "${found_any}" -eq 0 ]]; then
+  if [[ "${#DISCOVERED_BENCHES[@]}" -eq 0 ]]; then
     ui_info "No existing Frappe environments detected."
   fi
 
@@ -186,7 +217,9 @@ state_init() {
   # Older versions created state files world-readable (and stored the
   # MariaDB root password in them).
   chmod 600 "${INSTALLER_STATE_DIR}"/*.json 2>/dev/null || true
-  if [[ ! -f "${STATE_FILE}" ]]; then
+  if [[ -f "${STATE_FILE}" ]]; then
+    update_state "interrupted" "false"
+  else
     (umask 077; cat > "${STATE_FILE}") <<'EOF'
 {
   "os_checked": false,
@@ -205,14 +238,16 @@ state_init() {
 }
 EOF
   fi
+  save_state
 }
 
 # save_state — write current progress to the state file.
 save_state() {
   [[ -z "${STATE_FILE:-}" ]] && return 0
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "${STATE_FILE}" "${BENCH_DIR}" "${SELECTED_FRAPPE_VERSION}" "${SITE_NAME}" <<'PYEOF'
-import json, os, sys
+    python3 - "${STATE_FILE}" "${BENCH_DIR}" "${SELECTED_FRAPPE_VERSION}" "${SITE_NAME}" \
+      "${ENVIRONMENT_TYPE:-}" "${INSTALL_MODE}" <<'PYEOF'
+import json, os, sys, time
 state_file = sys.argv[1]
 os.umask(0o077)
 try:
@@ -223,6 +258,9 @@ except (FileNotFoundError, json.JSONDecodeError):
 state["bench_path"] = sys.argv[2]
 state["frappe_version"] = sys.argv[3]
 state["site_name"] = sys.argv[4]
+state["environment_type"] = sys.argv[5]
+state["install_mode"] = sys.argv[6]
+state["updated_at"] = int(time.time())
 with open(state_file, "w") as f:
     json.dump(state, f, indent=2)
 PYEOF
@@ -235,7 +273,7 @@ update_state() {
   [[ -z "${STATE_FILE:-}" ]] && return 0
   if command -v python3 >/dev/null 2>&1; then
     python3 - "${STATE_FILE}" "${key}" "${value}" <<'PYEOF'
-import json, os, sys
+import json, os, sys, time
 state_file, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
 os.umask(0o077)
 val = True if value == "true" else (False if value == "false" else value)
@@ -245,6 +283,7 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     state = {}
 state[key] = val
+state["updated_at"] = int(time.time())
 with open(state_file, "w") as f:
     json.dump(state, f, indent=2)
 PYEOF
@@ -275,8 +314,18 @@ PYEOF
   fi
 }
 
+# state_note_stage NAME — remember the stage in progress (called by ui_stage),
+# so an interrupted run can say exactly where it stopped.
+state_note_stage() {
+  if [[ -n "${STATE_FILE:-}" ]]; then
+    update_state "last_stage" "$1"
+  fi
+}
+
 # check_resume — detect a previous incomplete installation and offer to resume.
+# Interactive runs already decided this up front (resume_wizard).
 check_resume() {
+  [[ "${RESUME_DECIDED}" -eq 1 ]] && return 0
   [[ -z "${STATE_FILE:-}" || ! -f "${STATE_FILE}" ]] && return 0
 
   local verification_done

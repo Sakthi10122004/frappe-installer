@@ -79,6 +79,7 @@ verify_all() {
     hosts_entry_present /etc/hosts "${SITE_NAME}"
 
   # Warning-level checks (failures = READY_WITH_WARNINGS)
+  _verify_security
   if command -v wkhtmltopdf >/dev/null 2>&1; then
     PDF_READY=1
     ui_ok "PDF generation: wkhtmltopdf available"
@@ -91,6 +92,57 @@ verify_all() {
   _verify_http_health
 
   update_state "verification_complete" "true"
+}
+
+# ---- Security checks (warnings) ---------------------------------------------
+
+_verify_security() {
+  # Database and Redis must only listen on loopback; anything else lets other
+  # machines on the network try to log in.
+  local -a ports=(6379 11000 13000)
+  mariadb_is_external || ports=(3306 "${ports[@]}")
+  local port exposed=""
+  for port in "${ports[@]}"; do
+    if ss -tlnH 2>/dev/null | awk -v p=":${port}" '
+        { addr = $4 }
+        substr(addr, length(addr) - length(p) + 1) == p &&
+        addr !~ /^(127\.|\[::1\]|\[::ffff:127\.)/ { found = 1 }
+        END { exit !found }'; then
+      exposed+=" ${port}"
+    fi
+  done
+  if [[ -z "${exposed}" ]]; then
+    ui_ok "Database and Redis listen on localhost only"
+  else
+    ui_warn "Reachable from the network on port(s):${exposed} — bind them to 127.0.0.1 or firewall them"
+    VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+  fi
+
+  # Credential files must be private.
+  local f mode bad=""
+  for f in "${CREDENTIALS_FILE}" "${MARIADB_ACTIVE_CNF}" "${STATE_FILE:-}"; do
+    [[ -n "${f}" && -f "${f}" ]] || continue
+    mode="$(stat -c '%a' "${f}")"
+    if [[ "${mode}" != "600" ]]; then bad+=" ${f} (${mode})"; fi
+  done
+  if [[ -z "${bad}" ]]; then
+    ui_ok "Credential files are private (chmod 600)"
+  else
+    ui_warn "Credential files readable by others:${bad}"
+    VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+  fi
+
+  # Anonymous MariaDB accounts let anyone log in without a user name.
+  if ! mariadb_is_external; then
+    local anon
+    anon="$(mariadb_exec "SELECT COUNT(*) FROM mysql.global_priv WHERE User='';" 2>/dev/null | tail -n 1 || true)"
+    if [[ "${anon}" == "0" ]]; then
+      ui_ok "No anonymous MariaDB accounts"
+    elif [[ -n "${anon}" ]]; then
+      ui_warn "MariaDB has ${anon} anonymous account(s) — remove them (DROP USER ''@'localhost')"
+      VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+    fi
+  fi
 }
 
 # ---- HTTP health check ------------------------------------------------------
@@ -226,7 +278,10 @@ print_final_output() {
   # Administrator credentials
   ui_summary_header "ADMINISTRATOR"
   ui_line "  Username: Administrator"
-  ui_line "  Password: ${ADMIN_PASSWORD}"
+  # Not printed: terminal scrollback, screen sharing and recordings outlive
+  # the install. It is in the chmod-600 credentials file.
+  ui_line "  Password: saved in ${CREDENTIALS_FILE}"
+  ui_line "  ${C_DIM}View it with: cat \"${CREDENTIALS_FILE}\"${C_RESET}"
 
   # Database credentials
   ui_summary_header "DATABASE"

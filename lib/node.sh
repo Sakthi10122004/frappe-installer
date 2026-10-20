@@ -31,6 +31,40 @@ nvm_load() {
   return 0
 }
 
+# ---- Install NVM (pinned commit) --------------------------------------------
+# Replaces `curl .../install.sh | bash`: clone the release tag and refuse it
+# unless it is exactly the pinned commit. Node itself is then installed by
+# `nvm install`, which checks nodejs.org's SHA-256 sums.
+
+_install_nvm_verified() {
+  git -c advice.detachedHead=false clone --quiet --depth 1 --branch "${NVM_VERSION}" \
+    https://github.com/nvm-sh/nvm.git "${NVM_DIR_PATH}" || return 1
+
+  local actual
+  actual="$(git -C "${NVM_DIR_PATH}" rev-parse HEAD)"
+  if [[ "${actual}" != "${NVM_COMMIT}" ]]; then
+    echo "NVM ${NVM_VERSION} is commit ${actual}, expected ${NVM_COMMIT} — refusing it." >&2
+    rm -rf "${NVM_DIR_PATH}"
+    return 1
+  fi
+
+  # Make nvm (and so node/yarn for `bench start`) available in new shells,
+  # as nvm's own installer would.
+  local rc
+  for rc in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
+    [[ "${rc}" == "${HOME}/.bashrc" || -f "${rc}" ]] || continue
+    if ! grep -qs 'NVM_DIR/nvm.sh' "${rc}"; then
+      {
+        echo ''
+        echo '# nvm (added by frappe-installer)'
+        echo 'export NVM_DIR="$HOME/.nvm"'
+        echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"'
+        echo '[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"'
+      } >> "${rc}"
+    fi
+  done
+}
+
 # ---- Install Node.js -------------------------------------------------------
 
 install_node() {
@@ -38,8 +72,13 @@ install_node() {
 
   # ---- Install NVM ----------------------------------------------------------
   if [[ ! -s "${NVM_DIR_PATH}/nvm.sh" ]]; then
-    run_step "Installing NVM ${NVM_VERSION}" "install nvm" \
-      bash -c "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh | bash"
+    if [[ -e "${NVM_DIR_PATH}" && -n "$(ls -A "${NVM_DIR_PATH}" 2>/dev/null)" ]]; then
+      fail_fatal "${NVM_DIR_PATH} exists but has no nvm.sh (incomplete NVM install)."
+      ui_line "  Move it aside (mv ~/.nvm ~/.nvm.old) and re-run."
+      return 1
+    fi
+    run_step "Installing NVM ${NVM_VERSION} (commit-verified)" "install nvm" \
+      _install_nvm_verified
   else
     ui_skip "NVM"
   fi

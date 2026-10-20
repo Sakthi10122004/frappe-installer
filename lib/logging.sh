@@ -72,7 +72,10 @@ run_logged() {
     echo "+ $(_mask_secrets "$*")"
   } >> "${LOG_FILE}"
 
-  if "$@" >> "${LOG_FILE}" 2>&1; then
+  # stdin is /dev/null: a tool that unexpectedly asks a question would
+  # otherwise wait forever, its prompt hidden in the log behind the spinner.
+  # This way it fails at once and the error shows up in the log tail.
+  if "$@" < /dev/null >> "${LOG_FILE}" 2>&1; then
     echo "---- OK: ${desc} ----" >> "${LOG_FILE}"
     return 0
   else

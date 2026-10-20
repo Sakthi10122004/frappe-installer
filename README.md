@@ -8,9 +8,13 @@ This project aims to be a production-ready environment manager that handles Frap
 
 - **Multi-Version Support:** First-class support for Frappe 15 and Frappe 16 (with correct version pinning for Python, Node.js, and MariaDB).
 - **Idempotent by Design:** Safe to re-run at any time. It remembers what it has done and skips completed steps.
-- **State Tracking:** Can detect an interrupted installation and resume gracefully.
+- **Resume Anywhere:** Ctrl+C shows where it stopped and saves progress; the next run offers to continue exactly there or start fresh. Half-finished package installs are repaired automatically.
+- **Existing Installs:** If Frappe is already installed, choose to keep & repair it, update it, upgrade 15 → 16 in place (after a full backup), or install another version alongside. (In-place downgrades are impossible — Frappe migrations only go forward — so "downgrade" installs the older version as a separate bench.)
 - **Strict Isolation:** Uses `uv` for Python and `nvm` for Node.js, ensuring your system environments are never contaminated.
 - **Safety First:** It will **never** drop existing databases, delete users, change MariaDB root's login, or modify unrelated MariaDB configurations. On a socket-auth server it creates its own `frappe_installer_admin@localhost` account instead; the credentials are kept in `~/.frappe-installer/mariadb-admin.cnf` (chmod 600).
+- **Verified Downloads:** Nothing is piped from the internet into a shell. uv and wkhtmltopdf are pinned to SHA-256 checksums and NVM to an exact git commit (`lib/constants.sh`); a mismatch aborts. Node and Python downloads are checksum-verified by nvm and uv themselves.
+- **Fast Local Setups:** With `--env local`, MariaDB flushes its log about once a second instead of on every commit, which makes site creation several times faster (a machine crash can lose up to ~1s of writes; production keeps full durability). A freshly created site is not migrated a second time.
+- **Security Checks:** Verification warns if MariaDB/Redis listen beyond localhost, if credential files are not private, or if anonymous MariaDB accounts exist. The Administrator password is never printed — it lives in the chmod-600 credentials file.
 - **External Database:** If MariaDB can't run locally, `--doctor --component mariadb` can point the installer at a remote or Docker MariaDB instead.
 - **Environment Registry:** Keeps track of installed benches and sites in a central JSON registry (`~/.frappe-installer/environments.json`).
 - **Comprehensive Verification:** Verifies 15+ health checks at the end of the installation to ensure the site is truly ready.
@@ -73,6 +77,8 @@ The project has been heavily refactored from a monolithic script into modular co
 - `lib/redis.sh`: Redis installation and service checks.
 - `lib/bench.sh`: Bench CLI installation and `bench init`.
 - `lib/site.sh`: Site creation, hosts file mapping, and database migrations.
+- `lib/download.sh`: HTTPS-only downloads with SHA-256 verification.
+- `lib/lifecycle.sh`: Resume offer, existing-install actions, update and upgrade flows.
 - `lib/credentials.sh`: Atomic, secure credential generation in `<bench>/credentials/`.
 - `lib/verification.sh`: Post-installation health and HTTP readiness checks.
 
