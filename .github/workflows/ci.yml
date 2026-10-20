@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-and-unit:
+    name: shellcheck + unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -x -S warning -e SC1091,SC2034,SC2154,SC2164 \
+            install-frappe.sh lib/*.sh tools/*.sh tests/e2e/run.sh
+      - name: unit tests
+        run: |
+          rc=0
+          for t in tests/test-*.sh; do
+            echo "::group::${t}"
+            bash "${t}" || rc=1
+            echo "::endgroup::"
+          done
+          exit "${rc}"
+
+  e2e:
+    # Full installs on fresh machines (Docker containers running systemd).
+    name: e2e ${{ matrix.name }}
+    needs: lint-and-unit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-22.04 / frappe-15 / local
+            image: ubuntu:22.04
+            version: "15"
+            env: local
+          - name: debian-12 / frappe-15 / local
+            image: debian:12
+            version: "15"
+            env: local
+          - name: ubuntu-24.04 / frappe-16 / local
+            image: ubuntu:24.04
+            version: "16"
+            env: local
+          - name: ubuntu-24.04 / frappe-16 / prod
+            image: ubuntu:24.04
+            version: "16"
+            env: prod
+            args: --domain erp.example.test --no-firewall
+          - name: ubuntu-24.04 / frappe-15 → 16 upgrade
+            image: ubuntu:24.04
+            version: "15"
+            env: local
+            then: --action upgrade --version 16 --path /home/frappe/frappe15
+    steps:
+      - uses: actions/checkout@v4
+      - name: install
+        env:
+          THEN: ${{ matrix.then }}
+        run: tests/e2e/run.sh "${{ matrix.image }}" "${{ matrix.version }}" "${{ matrix.env }}" -- ${{ matrix.args }}

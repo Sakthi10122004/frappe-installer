@@ -60,7 +60,7 @@ ui_info "No existing Frappe environments detected."
 ui_stage "Environment setup"
 choice="$(ui_select "Where will this Frappe run?" 1 \
   "Local Setup|Development & testing|bench start on port 8000|Site mapped in /etc/hosts" \
-  "Production Server|Serving real users|Same install as Local today|nginx/supervisor: manual")"
+  "Production Server|Serving real users|nginx + supervisor + HTTPS|Firewall, fail2ban, backups")"
 version_choice="$(ui_select "Which Frappe Framework version do you want?" 1 \
   "Frappe 16|Recommended · newest|Python 3.14 · Node 24|MariaDB 11.8+|Supported to 2029" \
   "Frappe 15|Stable · widely used|Python 3.10 · Node 18|MariaDB 10.6+|Supported to 2027" \

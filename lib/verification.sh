@@ -75,8 +75,10 @@ verify_all() {
     bash -c "[[ -s '${BENCH_DIR}/sites/assets/assets.json' ]]"
   verify_check "site_config.json valid JSON" \
     bash -c "python3 -c \"import json; json.load(open('${BENCH_DIR}/sites/${SITE_NAME}/site_config.json'))\""
-  verify_check "/etc/hosts maps ${SITE_NAME}" \
-    hosts_entry_present /etc/hosts "${SITE_NAME}"
+  if [[ "${ENVIRONMENT_TYPE:-}" != "prod" ]]; then
+    verify_check "/etc/hosts maps ${SITE_NAME}" \
+      hosts_entry_present /etc/hosts "${SITE_NAME}"
+  fi
 
   # Warning-level checks (failures = READY_WITH_WARNINGS)
   _verify_security
@@ -88,8 +90,13 @@ verify_all() {
     VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
   fi
 
-  # HTTP health check
-  _verify_http_health
+  # HTTP health check: production is served by nginx + supervisor; local
+  # installs are probed with a temporary `bench start`.
+  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then
+    verify_production
+  else
+    _verify_http_health
+  fi
 
   update_state "verification_complete" "true"
 }
@@ -100,6 +107,8 @@ _verify_security() {
   # Database and Redis must only listen on loopback; anything else lets other
   # machines on the network try to log in.
   local -a ports=(6379 11000 13000)
+  # In production gunicorn must sit behind nginx, never be reachable directly.
+  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then ports+=(8000); fi
   mariadb_is_external || ports=(3306 "${ports[@]}")
   local port exposed=""
   for port in "${ports[@]}"; do
@@ -266,7 +275,12 @@ print_final_output() {
   ui_summary_field "Framework" "Frappe ${frappe_version}"
   ui_summary_field "Bench" "${BENCH_DIR}"
   ui_summary_field "Site" "${SITE_NAME}"
-  ui_summary_field "URL" "http://${SITE_NAME}:8000"
+  local url="http://${SITE_NAME}:8000"
+  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then
+    url="http://${SITE_NAME}"
+    [[ "${PROD_HTTPS}" -eq 1 ]] && url="https://${SITE_NAME}"
+  fi
+  ui_summary_field "URL" "${url}"
   ui_summary_field "Credentials" "${CREDENTIALS_FILE}"
 
   if [[ "${PDF_READY}" -eq 1 ]]; then
@@ -294,13 +308,26 @@ print_final_output() {
   ui_line "  Frappe DB User: ${FRAPPE_DB_USER}"
   ui_line "  Frappe DB Password: (see credentials file)"
 
-  # Start instructions
-  ui_summary_header "START FRAPPE"
-  ui_blank
-  ui_line "  cd \"${BENCH_DIR}\""
-  ui_line "  bench start"
-  ui_blank
-  ui_line "  Then open: http://${SITE_NAME}:8000"
+  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then
+    ui_summary_header "PRODUCTION SERVICES"
+    ui_line "  Frappe runs under supervisor and starts at boot — no 'bench start' needed."
+    ui_line "  Status:    sudo supervisorctl status"
+    ui_line "  Restart:   sudo supervisorctl restart all"
+    ui_line "  Logs:      ${BENCH_DIR}/logs/"
+    ui_line "  Backups:   every 6 h via cron → ${BENCH_DIR}/sites/${SITE_NAME}/private/backups"
+    ui_line "             (copy them off this server regularly)"
+    if [[ "${PROD_HTTPS}" -ne 1 ]]; then
+      ui_warn "No HTTPS yet: point ${SITE_NAME}'s DNS here and re-run with --letsencrypt-email."
+    fi
+  else
+    # Start instructions
+    ui_summary_header "START FRAPPE"
+    ui_blank
+    ui_line "  cd \"${BENCH_DIR}\""
+    ui_line "  bench start"
+    ui_blank
+    ui_line "  Then open: ${url}"
+  fi
 
   # Security advice
   ui_blank

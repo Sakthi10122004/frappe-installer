@@ -140,6 +140,49 @@ _verify_site_db_connection() {
     -e "USE \`${FRAPPE_DB_NAME}\`;" >/dev/null 2>&1
 }
 
+# ---- Secrets for bench new-site (never on the command line) ------------------
+# Frappe reads root_login / root_password / admin_password from
+# common_site_config.json before it would prompt. Passing them that way keeps
+# them out of `ps` (readable by every local user), unlike CLI options. The
+# file is owner-only while they are in it; they are removed right after
+# new-site, and on error/interrupt by on_exit. Values the user already had are
+# kept under "_installer_saved_values" and restored; the keys set are listed
+# under "_installer_temp_keys", so a crash leftover is undone on the next run.
+
+# _bench_secrets set|clear — reads (for set) three lines on stdin:
+# admin login, its password, the Administrator password.
+_bench_secrets() {
+  local conf="${BENCH_DIR}/sites/common_site_config.json"
+  [[ -f "${conf}" ]] || return 0
+  python3 -c '
+import json, os, sys
+action, path = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    conf = json.load(f)
+# Undo a previous "set": drop what it added, put back what it replaced.
+added = conf.pop("_installer_temp_keys", [])
+saved = conf.pop("_installer_saved_values", {})
+for key in added:
+    conf.pop(key, None)
+conf.update(saved)
+if action == "set":
+    login, password, admin = (sys.stdin.readline().rstrip("\n") for _ in range(3))
+    new = {"root_login": login, "root_password": password, "admin_password": admin}
+    new = {k: v for k, v in new.items() if v}
+    saved = {k: conf[k] for k in new if k in conf}
+    conf.update(new)
+    conf["_installer_temp_keys"] = list(new)
+    conf["_installer_saved_values"] = saved
+elif not added:
+    sys.exit(0)
+tmp = path + ".tmp"
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as f:
+    json.dump(conf, f, indent=1, sort_keys=True)
+os.replace(tmp, path)
+' "$1" "${conf}"
+}
+
 # ---- Create site ------------------------------------------------------------
 
 create_site() {
@@ -213,10 +256,7 @@ create_site() {
   # Database name and password are left to Frappe (random, unique), so a
   # recreated site never collides with an old database, and the DB password
   # never appears on a command line. They are read back afterwards.
-  local -a db_args=(
-    --mariadb-root-username "${MARIADB_ADMIN_USER}"
-    --mariadb-root-password "${MARIADB_ADMIN_PASSWORD}"
-  )
+  local -a db_args=()
   if [[ -n "${DB_HOST}" ]]; then
     db_args+=(--db-host "${DB_HOST}" --db-port "${DB_PORT:-3306}")
     # The site's DB user must be allowed to log in from this machine, not
@@ -226,10 +266,17 @@ create_site() {
     fi
   fi
 
-  run_step "Creating site ${SITE_NAME}" "bench new-site" \
-    bench new-site "${SITE_NAME}" \
-      "${db_args[@]}" \
-      --admin-password "${ADMIN_PASSWORD}"
+  printf '%s\n' "${MARIADB_ADMIN_USER}" "${MARIADB_ADMIN_PASSWORD}" "${ADMIN_PASSWORD}" \
+    | _bench_secrets set
+  BENCH_SECRETS_PENDING=1
+  if ! run_step "Creating site ${SITE_NAME}" "bench new-site" \
+      bench new-site "${SITE_NAME}" "${db_args[@]}"; then
+    _bench_secrets clear
+    BENCH_SECRETS_PENDING=0
+    return 1
+  fi
+  _bench_secrets clear
+  BENCH_SECRETS_PENDING=0
 
   [[ -d "sites/${SITE_NAME}" ]] || {
     fail_fatal "Site directory not found after new-site"
@@ -245,6 +292,10 @@ create_site() {
 # ---- Hosts file management --------------------------------------------------
 
 configure_hosts_file() {
+  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then
+    ui_skip "/etc/hosts entry (production uses real DNS for ${SITE_NAME})"
+    return 0
+  fi
   if hosts_entry_present "/etc/hosts" "${SITE_NAME}"; then
     ui_skip "/etc/hosts entry for ${SITE_NAME}"
     return 0

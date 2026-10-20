@@ -165,6 +165,7 @@ FRAPPE_DB_PASSWORD=""
 SITE_DB_HOST=""
 SITE_DB_PORT=""
 SITE_JUST_CREATED=0
+BENCH_SECRETS_PENDING=0       # 1 while new-site credentials sit in common_site_config
 ADMIN_PASSWORD=""
 CREDENTIALS_FILE=""
 VERIFY_FAILURES=0
@@ -176,6 +177,13 @@ LAST_FAILED_CMD=""
 INSTALL_MODE="fresh"
 UPGRADE_FROM_VERSION=""
 RESUME_DECIDED=0
+CLI_ACTION=""                 # --action keep|update|upgrade (non-interactive lifecycle)
+
+# ---- Production (see lib/production.sh) ----------------------------------------
+PROD_DOMAIN=""                # --domain
+PROD_LETSENCRYPT_EMAIL=""     # --letsencrypt-email (enables HTTPS)
+PROD_FIREWALL=1               # --no-firewall sets 0
+PROD_HTTPS=0
 DISCOVERED_BENCHES=()
 
 # ---- sudo command array (replaced with empty array when running as root) ----

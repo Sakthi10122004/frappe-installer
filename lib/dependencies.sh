@@ -31,12 +31,29 @@ apt_install_missing() {
     "${SUDO[@]}" "${APT_GET[@]}" install -y "${missing[@]}"
 }
 
+# ---- Bootstrap essentials ------------------------------------------------------
+# Minimal server/container images can lack the tools the installer itself
+# needs before stage 4: curl (internet check, downloads), python3 (state and
+# registry files), iproute2 (`ss`, port checks).
+
+bootstrap_essentials() {
+  local -a missing=() p
+  for p in curl ca-certificates python3 iproute2; do
+    dpkg -s "${p}" >/dev/null 2>&1 || missing+=("${p}")
+  done
+  [[ "${#missing[@]}" -gt 0 ]] || return 0
+  apt_update_once
+  run_step "Installing installer prerequisites (${missing[*]})" "bootstrap essentials" \
+    "${SUDO[@]}" "${APT_GET[@]}" install -y "${missing[@]}"
+}
+
 # ---- Base system packages ---------------------------------------------------
 
 install_base_packages() {
   local -a pkgs=(
-    git curl wget ca-certificates gnupg lsb-release software-properties-common
+    git curl wget ca-certificates gnupg lsb-release
     build-essential pkg-config
+    xz-utils cron          # nvm's Node tarballs; bench's backup crontab
     python3-dev
     libffi-dev libssl-dev
     xvfb libfontconfig1

@@ -48,6 +48,7 @@ source "${SCRIPT_DIR}/lib/recovery.sh"
 source "${SCRIPT_DIR}/lib/diagnostics.sh"
 source "${SCRIPT_DIR}/lib/apps.sh"
 source "${SCRIPT_DIR}/lib/lifecycle.sh"
+source "${SCRIPT_DIR}/lib/production.sh"
 
 # ============================================================================
 # ARGUMENT PARSING
@@ -68,6 +69,11 @@ OPTIONS:
                        The bench will be created at PATH/frappe-bench
   --site SITE_NAME     Site name to create. Default: frappe.local
   --env TYPE           Environment type (local or prod). Default: interactive
+  --domain NAME        Production: the site's domain (e.g. erp.example.com)
+  --letsencrypt-email EMAIL
+                       Production: get a Let's Encrypt HTTPS certificate
+  --no-firewall        Production: don't enable ufw
+  --action ACTION      Existing bench at --path: keep | update | upgrade
   --non-interactive    Never prompt. Fail instead of asking.
   --no-animation       Plain, static output (also: FRAPPE_INSTALLER_NO_ANIMATION=1;
                        NO_COLOR=1 turns off colors too).
@@ -83,7 +89,10 @@ EXAMPLES:
   ./${INSTALLER_NAME} --version 16
   ./${INSTALLER_NAME} --version 15 --site college.local
   ./${INSTALLER_NAME} --env prod --version 16
-  ./${INSTALLER_NAME} --non-interactive --env local --version 16 --site prod.local
+  ./${INSTALLER_NAME} --non-interactive --env local --version 16 --site dev.local
+  ./${INSTALLER_NAME} --non-interactive --env prod --version 16 \
+      --domain erp.example.com --letsencrypt-email admin@example.com
+  ./${INSTALLER_NAME} --non-interactive --env local --path ~/frappe15 --action upgrade --version 16
 
 Re-running this script is safe: it detects what is already installed and
 configured, and only performs the steps that are still needed.
@@ -119,6 +128,23 @@ parse_args() {
         NON_INTERACTIVE=1; shift ;;
       --no-animation)
         UI_ANIMATE=0; shift ;;
+      --domain)
+        [[ $# -ge 2 ]] || { echo "Error: --domain requires a value" >&2; exit 2; }
+        PROD_DOMAIN="$2"; shift 2 ;;
+      --domain=*)
+        PROD_DOMAIN="${1#*=}"; shift ;;
+      --letsencrypt-email)
+        [[ $# -ge 2 ]] || { echo "Error: --letsencrypt-email requires a value" >&2; exit 2; }
+        PROD_LETSENCRYPT_EMAIL="$2"; shift 2 ;;
+      --letsencrypt-email=*)
+        PROD_LETSENCRYPT_EMAIL="${1#*=}"; shift ;;
+      --no-firewall)
+        PROD_FIREWALL=0; shift ;;
+      --action)
+        [[ $# -ge 2 ]] || { echo "Error: --action requires a value (keep, update or upgrade)" >&2; exit 2; }
+        CLI_ACTION="$2"; shift 2 ;;
+      --action=*)
+        CLI_ACTION="${1#*=}"; shift ;;
       --check)
         RUN_MODE="check"; shift ;;
       --doctor)
@@ -163,6 +189,22 @@ parse_args() {
     esac
   fi
 
+  # Validate --action if specified
+  if [[ -n "${CLI_ACTION}" ]]; then
+    case "${CLI_ACTION}" in
+      keep|update|upgrade) : ;;
+      *)
+        echo "Error: --action must be keep, update or upgrade (got '${CLI_ACTION}')" >&2
+        exit 2
+        ;;
+    esac
+  fi
+
+  # --domain is the production site name
+  if [[ -n "${PROD_DOMAIN}" && -z "${SITE_NAME}" ]]; then
+    SITE_NAME="${PROD_DOMAIN}"
+  fi
+
   # Validate --env if specified
   if [[ -n "${ENVIRONMENT_TYPE:-}" ]]; then
     case "${ENVIRONMENT_TYPE}" in
@@ -183,20 +225,24 @@ main_install() {
   # ---- Stage 1: System detection -------------------------------------------
   ui_stage "System detection"
   detect_os
-  check_internet
   check_sudo
+  bootstrap_essentials
+  check_internet
   check_memory
 
   # ---- Stage 2: Existing environment detection ------------------------------
   ui_stage "Existing environment detection"
   registry_init
   discover_environments
+  apply_cli_action               # --action keep|update|upgrade
   resume_wizard                  # unfinished install? continue / start fresh
   existing_environment_wizard    # Frappe found? keep / update / upgrade / downgrade
 
   # ---- Stage 3: Version & Environment selection -----------------------------
   ui_stage "Environment setup"
   select_environment_type
+  production_preflight
+  if [[ "${ENVIRONMENT_TYPE}" == "prod" ]]; then TOTAL_STAGES=11; fi
   select_frappe_version
   choose_alongside_path
   check_os_compatibility "${SELECTED_FRAPPE_VERSION}"
@@ -207,6 +253,7 @@ main_install() {
   check_resume
 
   # Site wizard (get site name + admin password)
+  production_domain_wizard
   site_wizard
   prompt_admin_password
   save_state
@@ -250,6 +297,7 @@ main_install() {
   # ---- Stage 9: Site creation -----------------------------------------------
   ui_stage "Site creation"
   load_existing_credentials  # bench dir now exists; pick up any prior creds
+  _bench_secrets clear       # leftovers from a crashed earlier run, if any
   bench_redis_start
   create_site
   configure_hosts_file
@@ -261,6 +309,12 @@ main_install() {
 
   # Update registry
   registry_add "${SELECTED_FRAPPE_VERSION}" "${BENCH_DIR}" "${SITE_NAME}"
+
+  # ---- Stage 10 (prod): Production services ---------------------------------
+  if [[ "${ENVIRONMENT_TYPE}" == "prod" ]]; then
+    ui_stage "Production services"
+    production_setup
+  fi
 
   # ---- Stage 10: Verification -----------------------------------------------
   ui_stage "Verification"

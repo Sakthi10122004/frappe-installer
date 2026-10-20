@@ -118,9 +118,49 @@ resume_wizard() {
 
 # ---- Existing benches ---------------------------------------------------------
 
+# apply_cli_action — `--action keep|update|upgrade` for scripted runs: the
+# bench is --path's bench, or the only bench on the machine.
+apply_cli_action() {
+  [[ -n "${CLI_ACTION}" ]] || return 0
+
+  local bench=""
+  if [[ -n "${INSTALL_PATH}" ]]; then
+    bench="${INSTALL_PATH%/}/${BENCH_SUBDIR}"
+  elif [[ "${#DISCOVERED_BENCHES[@]}" -eq 1 ]]; then
+    bench="${DISCOVERED_BENCHES[0]}"
+  else
+    fail_fatal "--action needs --path when there isn't exactly one bench on this machine."
+    exit 2
+  fi
+  if ! is_valid_bench_dir "${bench}"; then
+    fail_fatal "--action ${CLI_ACTION}: no bench found at ${bench}"
+    exit 2
+  fi
+
+  local ver
+  ver="$(detect_bench_frappe_version "${bench}")"
+  if [[ "${CLI_ACTION}" == "upgrade" ]]; then
+    if [[ "${ver}" != "15" ]]; then
+      fail_fatal "--action upgrade supports Frappe 15 → 16; this bench is Frappe ${ver}."
+      exit 2
+    fi
+    UPGRADE_FROM_VERSION=15
+    SELECTED_FRAPPE_VERSION=16
+  else
+    SELECTED_FRAPPE_VERSION="${ver}"
+  fi
+  INSTALL_MODE="${CLI_ACTION}"
+  INSTALL_PATH="$(dirname "${bench}")"
+  BENCH_SUBDIR="$(basename "${bench}")"
+  [[ -n "${SITE_NAME}" ]] || SITE_NAME="$(bench_default_site "${bench}")"
+  RESUME_DECIDED=1
+  ui_ok "Action: $(install_mode_label) — $(ui_short_path "${bench}")"
+}
+
 # existing_environment_wizard — what to do when Frappe is already installed.
 existing_environment_wizard() {
   [[ "${NON_INTERACTIVE}" -eq 1 ]] && return 0
+  [[ "${INSTALL_MODE}" != "fresh" ]] && return 0
   [[ "${RESUME_DECIDED}" -eq 1 && -n "${SELECTED_FRAPPE_VERSION}" ]] && return 0
   # Explicit --version/--path means the user already decided.
   [[ -n "${SELECTED_FRAPPE_VERSION}" || -n "${INSTALL_PATH}" ]] && return 0

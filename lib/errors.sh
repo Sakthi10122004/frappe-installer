@@ -90,6 +90,10 @@ on_exit() {
   if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
     kill "${SUDO_KEEPALIVE_PID}" 2>/dev/null || true
   fi
+  # Credentials handed to `bench new-site` through common_site_config.json.
+  if [[ "${BENCH_SECRETS_PENDING:-0}" -eq 1 ]] && declare -F _bench_secrets >/dev/null 2>&1; then
+    _bench_secrets clear 2>/dev/null || true
+  fi
   # A `bench start` launched by the HTTP health check.
   if declare -F _stop_probe_server >/dev/null 2>&1; then
     _stop_probe_server 2>/dev/null || true
