@@ -10,6 +10,25 @@ nvm_load() {
   export NVM_DIR="${NVM_DIR_PATH}"
   # shellcheck source=/dev/null
   [[ -s "${NVM_DIR}/nvm.sh" ]] && source "${NVM_DIR}/nvm.sh"
+  # Sourcing nvm.sh in a non-interactive shell doesn't put any Node on PATH.
+  # Activate the version the selected Frappe needs — not simply the newest
+  # one, which would run a Frappe 15 bench on Node 24 when both exist.
+  local required_node="${FRAPPE_CONFIG[node]:-}"
+  [[ -n "${required_node}" ]] || return 0
+  if command -v nvm >/dev/null 2>&1; then
+    nvm use --silent "${required_node}" >/dev/null 2>&1 || true
+  fi
+  # Fallback when `nvm use` fails (it is fragile under set -u in subshells):
+  # put the newest installed vREQUIRED.x on PATH directly.
+  if ! node --version 2>/dev/null | grep -q "^v${required_node}\."; then
+    local node_bin
+    node_bin="$(find "${NVM_DIR}/versions/node" -mindepth 2 -maxdepth 2 -type d \
+      -path "*/v${required_node}.*/bin" 2>/dev/null | sort -V | tail -n 1 || true)"
+    if [[ -n "${node_bin}" ]]; then
+      export PATH="${node_bin}:${PATH}"
+    fi
+  fi
+  return 0
 }
 
 # ---- Install Node.js -------------------------------------------------------

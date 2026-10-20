@@ -10,6 +10,8 @@ log_init() {
   mkdir -p "${INSTALLER_LOG_DIR}"
   mkdir -p "${INSTALLER_STATE_DIR}"
   mkdir -p "${INSTALLER_CACHE_DIR}"
+  # Logs, state and option files can contain credentials.
+  chmod 700 "${INSTALLER_HOME}" "${INSTALLER_LOG_DIR}" "${INSTALLER_STATE_DIR}" 2>/dev/null || true
 
   # Per-installation log file
   local timestamp
@@ -29,7 +31,10 @@ log_init() {
 # ---- Log-only output (never shown to user) ----------------------------------
 
 log_only() {
-  [[ -n "${LOG_FILE:-}" && -f "${LOG_FILE:-/dev/null}" ]] && echo "$*" >> "${LOG_FILE}"
+  if [[ -n "${LOG_FILE:-}" && -f "${LOG_FILE:-}" ]]; then
+    echo "$*" >> "${LOG_FILE}"
+  fi
+  return 0
 }
 
 # ---- Secret masking ---------------------------------------------------------
@@ -40,7 +45,8 @@ _mask_secrets() {
   local -a secrets_to_mask=()
 
   # Collect non-empty secrets
-  [[ -n "${MARIADB_ROOT_PASSWORD:-}" ]] && secrets_to_mask+=("${MARIADB_ROOT_PASSWORD}")
+  [[ -n "${MARIADB_ADMIN_PASSWORD:-}" ]] && secrets_to_mask+=("${MARIADB_ADMIN_PASSWORD}")
+  [[ -n "${MARIADB_LEGACY_ROOT_PASSWORD:-}" ]] && secrets_to_mask+=("${MARIADB_LEGACY_ROOT_PASSWORD}")
   [[ -n "${ADMIN_PASSWORD:-}" ]] && secrets_to_mask+=("${ADMIN_PASSWORD}")
   [[ -n "${FRAPPE_DB_PASSWORD:-}" ]] && secrets_to_mask+=("${FRAPPE_DB_PASSWORD}")
 
@@ -66,19 +72,12 @@ run_logged() {
     echo "+ $(_mask_secrets "$*")"
   } >> "${LOG_FILE}"
 
-  # Capture output to mask secrets before writing to log
-  local tmpout
-  tmpout="$(mktemp)"
-  if "$@" > "${tmpout}" 2>&1; then
-    _mask_secrets "$(cat "${tmpout}")" >> "${LOG_FILE}"
+  if "$@" >> "${LOG_FILE}" 2>&1; then
     echo "---- OK: ${desc} ----" >> "${LOG_FILE}"
-    rm -f "${tmpout}"
     return 0
   else
     local rc=$?
-    _mask_secrets "$(cat "${tmpout}")" >> "${LOG_FILE}"
     echo "---- FAILED (exit ${rc}): ${desc} ----" >> "${LOG_FILE}"
-    rm -f "${tmpout}"
     return "${rc}"
   fi
 }

@@ -17,6 +17,13 @@ INSTALLER_STATE_DIR="${INSTALLER_HOME}/state"
 INSTALLER_LOG_DIR="${INSTALLER_HOME}/logs"
 INSTALLER_CACHE_DIR="${INSTALLER_HOME}/cache"
 
+# ---- MariaDB admin credentials (machine-wide, chmod 600 option files) -------
+# Local server: the admin account the installer uses for `bench new-site`.
+# External server: written by `--doctor --component mariadb` → fallback [1].
+MARIADB_ADMIN_CNF="${INSTALLER_HOME}/mariadb-admin.cnf"
+MARIADB_EXTERNAL_CNF="${INSTALLER_HOME}/mariadb-external.cnf"
+MARIADB_INSTALLER_ADMIN_USER="frappe_installer_admin"
+
 # ---- Default runtime values (overridable via CLI flags) --------------------
 DEFAULT_INSTALL_PATH_15="${HOME}/frappe15"
 DEFAULT_INSTALL_PATH_16="${HOME}/frappe16"
@@ -27,7 +34,8 @@ BENCH_SUBDIR="frappe-bench"
 NVM_VERSION="v0.40.3"
 
 # ---- Terminal colors --------------------------------------------------------
-if [[ -t 1 ]]; then
+# Disabled for pipes/files, TERM=dumb, and when NO_COLOR is set (no-color.org).
+if [[ -t 1 && "${TERM:-dumb}" != "dumb" && -z "${NO_COLOR:-}" ]]; then
   C_RESET=$'\033[0m';  C_BOLD=$'\033[1m';   C_DIM=$'\033[2m'
   C_RED=$'\033[31m';   C_GREEN=$'\033[32m';  C_YELLOW=$'\033[33m'
   C_BLUE=$'\033[34m';  C_MAGENTA=$'\033[35m'; C_CYAN=$'\033[36m'
@@ -39,6 +47,26 @@ fi
 
 # ---- Spinner characters ----------------------------------------------------
 SPINNER_CHARS='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+
+# ---- Rich terminal UI --------------------------------------------------------
+# UI_COLOR_DEPTH: truecolor | 256 | basic | none — picks how gradients render.
+# UI_ANIMATE: 1 = animated banner/progress/confetti; off with --no-animation
+# or FRAPPE_INSTALLER_NO_ANIMATION=1. Animations never run without colors.
+UI_COLOR_DEPTH="none"
+if [[ -n "${C_RESET}" ]]; then
+  if [[ "${COLORTERM:-}" == "truecolor" || "${COLORTERM:-}" == "24bit" ]]; then
+    UI_COLOR_DEPTH="truecolor"
+  elif [[ "$(tput colors 2>/dev/null || echo 8)" -ge 256 ]]; then
+    UI_COLOR_DEPTH="256"
+  else
+    UI_COLOR_DEPTH="basic"
+  fi
+fi
+UI_ANIMATE=0
+if [[ -n "${C_RESET}" && "${FRAPPE_INSTALLER_NO_ANIMATION:-0}" != "1" ]]; then
+  UI_ANIMATE=1
+fi
+printf -v UI_INSTALL_STARTED_AT '%(%s)T' -1
 
 # ---- Known Frappe environment search paths ----------------------------------
 KNOWN_BENCH_PATHS=(
@@ -105,9 +133,16 @@ OS_ID=""
 OS_VERSION_ID=""
 OS_PRETTY=""
 ARCH=""
-MARIADB_ROOT_AUTH_MODE=""
-MARIADB_ROOT_PASSWORD=""
+# MariaDB admin account used for `bench new-site`. The installer never changes
+# root's authentication; on a socket-auth server it creates its own admin user.
+MARIADB_ADMIN_USER=""
+MARIADB_ADMIN_PASSWORD=""
+MARIADB_LEGACY_ROOT_PASSWORD=""   # root password saved by installer <= 2.0.0
+MARIADB_ACTIVE_CNF=""             # option file passed to the mariadb client
+DB_HOST=""                        # empty = local MariaDB on this machine
+DB_PORT=""
 FRESH_MARIADB_INSTALL=0
+SUDO_KEEPALIVE_PID=""
 APT_UPDATED=0
 UV_BIN=""
 NVM_DIR_PATH="${HOME}/.nvm"
@@ -120,6 +155,12 @@ VERIFY_FAILURES=0
 
 # ---- sudo command array (replaced with empty array when running as root) ----
 SUDO=(sudo)
+
+# ---- apt-get that never stops to ask questions ------------------------------
+# Output goes to the log file, so an interactive prompt (debconf, needrestart)
+# would hang invisibly behind the spinner. env is used because sudo strips
+# the caller's environment.
+APT_GET=(env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get)
 
 # ---- Minimum disk space (MB) for installation ------------------------------
 MIN_DISK_SPACE_MB=5000

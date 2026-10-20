@@ -25,8 +25,10 @@ HEAD
   echo
   sed -n '/^version_major() {/,/^}/p' lib/os.sh
   echo
-  # Extract detect_os from os.sh
+  # Extract detect_os and check_os_compatibility from os.sh
   sed -n '/^detect_os() {/,/^}/p' lib/os.sh
+  echo
+  sed -n '/^check_os_compatibility() {/,/^}/p' lib/os.sh
 }
 
 run_os_case() {
@@ -87,15 +89,67 @@ check_accepted "Debian 13" 'ID=debian
 VERSION_ID="13"
 PRETTY_NAME="Debian GNU/Linux 13 (trixie)"'
 
-echo "== Rejected distros (must fail safely) =="
-check_rejected "Ubuntu 20.04 (too old)" 'ID=ubuntu
+# run_compat_case FRAPPE_VERSION OS_RELEASE — detect_os + check_os_compatibility
+# in non-interactive mode (which warns and continues instead of prompting).
+run_compat_case() {
+  local frappe_version="$1" os_release_content="$2"
+  local tmpf; tmpf="$(mktemp)"
+  printf '%s\n' "${os_release_content}" > "${tmpf}"
+  local src; src="$(extract_detect_os)"
+  bash -c "
+    source lib/constants.sh
+    ${src}
+    NON_INTERACTIVE=1
+    for k in \"\${!FRAPPE_${frappe_version}_CONFIG[@]}\"; do
+      eval \"FRAPPE_CONFIG[\$k]=\\\${FRAPPE_${frappe_version}_CONFIG[\$k]}\"
+    done
+    export OS_RELEASE_FILE='${tmpf}'
+    detect_os && check_os_compatibility ${frappe_version}
+  " 2>&1
+  local rc=$?
+  rm -f "${tmpf}"
+  return "${rc}"
+}
+
+check_compat() {
+  local desc="$1" frappe_version="$2" expect="$3" content="$4"
+  local out
+  out="$(run_compat_case "${frappe_version}" "${content}")"
+  local got="supported"
+  echo "${out}" | grep -q "outside the official" && got="outside"
+  if [[ "${got}" == "${expect}" ]]; then
+    echo "  ok   - ${desc} (${expect})"; PASS=$((PASS+1))
+  else
+    echo "  FAIL - ${desc} (expected ${expect}, got ${got}: ${out})"; FAIL=$((FAIL+1))
+  fi
+}
+
+echo "== Version support matrix (old releases warn, not rejected) =="
+check_compat "Ubuntu 20.04 for Frappe 15" 15 outside 'ID=ubuntu
 VERSION_ID="20.04"
 PRETTY_NAME="Ubuntu 20.04.6 LTS"'
 
-check_rejected "Ubuntu 18.04 (too old)" 'ID=ubuntu
+check_compat "Ubuntu 18.04 for Frappe 15" 15 outside 'ID=ubuntu
 VERSION_ID="18.04"
 PRETTY_NAME="Ubuntu 18.04.6 LTS"'
 
+check_compat "Ubuntu 22.04 for Frappe 15" 15 supported 'ID=ubuntu
+VERSION_ID="22.04"
+PRETTY_NAME="Ubuntu 22.04.5 LTS"'
+
+check_compat "Ubuntu 22.04 for Frappe 16" 16 outside 'ID=ubuntu
+VERSION_ID="22.04"
+PRETTY_NAME="Ubuntu 22.04.5 LTS"'
+
+check_compat "Debian 12 for Frappe 16" 16 outside 'ID=debian
+VERSION_ID="12"
+PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"'
+
+check_compat "Debian 13 for Frappe 16" 16 supported 'ID=debian
+VERSION_ID="13"
+PRETTY_NAME="Debian GNU/Linux 13 (trixie)"'
+
+echo "== Rejected distros (must fail safely) =="
 check_rejected "Arch Linux" 'ID=arch
 PRETTY_NAME="Arch Linux"'
 

@@ -34,7 +34,7 @@ install_redis() {
   else
     apt_update_once
     run_step "Installing Redis" "apt-get install redis" \
-      "${SUDO[@]}" apt-get install -y redis-server
+      "${SUDO[@]}" "${APT_GET[@]}" install -y redis-server
   fi
 
   # Ensure service is enabled and started

@@ -65,10 +65,11 @@ init_bench() {
   export PATH="${HOME}/.local/bin:${PATH}"
 
   cd "${INSTALL_PATH}"
-  run_step "Creating bench (frappe ${FRAPPE_BRANCH}) — this usually takes 5-15 mins" \
+  run_step "Creating bench (frappe ${FRAPPE_BRANCH}) — this usually takes 2-5 mins" \
     "bench init" \
     env UV_PYTHON="${required_python}" bench init \
       --frappe-branch "${FRAPPE_BRANCH}" \
+      --depth 1 \
       "${BENCH_SUBDIR}"
 
   is_valid_bench_dir "${BENCH_DIR}" || {

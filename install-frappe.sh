@@ -67,6 +67,8 @@ OPTIONS:
   --site SITE_NAME     Site name to create. Default: frappe.local
   --env TYPE           Environment type (local or prod). Default: interactive
   --non-interactive    Never prompt. Fail instead of asking.
+  --no-animation       Plain, static output (also: FRAPPE_INSTALLER_NO_ANIMATION=1;
+                       NO_COLOR=1 turns off colors too).
   --check              System check — make no changes, report status.
   --doctor             Diagnose common problems and suggest fixes.
   --list               List all detected Frappe environments.
@@ -113,6 +115,8 @@ parse_args() {
         ENVIRONMENT_TYPE="${1#*=}"; shift ;;
       --non-interactive)
         NON_INTERACTIVE=1; shift ;;
+      --no-animation)
+        UI_ANIMATE=0; shift ;;
       --check)
         RUN_MODE="check"; shift ;;
       --doctor)
@@ -179,7 +183,6 @@ main_install() {
   detect_os
   check_internet
   check_sudo
-  check_disk_space "${HOME}"
   check_memory
 
   # ---- Stage 2: Existing environment detection ------------------------------
@@ -192,6 +195,7 @@ main_install() {
   select_environment_type
   select_frappe_version
   check_os_compatibility "${SELECTED_FRAPPE_VERSION}"
+  check_disk_space "${INSTALL_PATH}"
 
   # Initialize state tracking now that BENCH_DIR is known
   state_init
@@ -213,7 +217,7 @@ main_install() {
   install_mariadb
   configure_mariadb
   load_existing_credentials
-  detect_mariadb_root_auth
+  detect_mariadb_admin_auth
 
   # ---- Stage 6: Redis ------------------------------------------------------
   ui_stage "Redis"
@@ -236,10 +240,13 @@ main_install() {
   # ---- Stage 9: Site creation -----------------------------------------------
   ui_stage "Site creation"
   load_existing_credentials  # bench dir now exists; pick up any prior creds
+  bench_redis_start
   create_site
   configure_hosts_file
   set_default_site
   run_migrations
+  build_assets
+  bench_redis_stop
   write_credentials_file
 
   # Update registry
@@ -250,7 +257,11 @@ main_install() {
   verify_all
 
   # ---- Final output ---------------------------------------------------------
-  print_final_output
+  # `if !` keeps a failed verification from also firing the ERR trap, which
+  # would print a second failure banner.
+  if ! print_final_output; then
+    exit 1
+  fi
 }
 
 # ============================================================================

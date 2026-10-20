@@ -9,7 +9,7 @@
 apt_update_once() {
   if [[ "${APT_UPDATED}" -eq 0 ]]; then
     run_step "Refreshing package lists" "apt-get update" \
-      "${SUDO[@]}" apt-get update -y
+      "${SUDO[@]}" "${APT_GET[@]}" update -y
     APT_UPDATED=1
   fi
 }
@@ -28,7 +28,7 @@ apt_install_missing() {
   apt_update_once
   run_step "Installing packages (${#missing[@]} missing)" \
     "apt-get install ${missing[*]}" \
-    "${SUDO[@]}" apt-get install -y "${missing[@]}"
+    "${SUDO[@]}" "${APT_GET[@]}" install -y "${missing[@]}"
 }
 
 # ---- Base system packages ---------------------------------------------------
@@ -56,7 +56,7 @@ install_base_packages() {
   apt_update_once
   run_step "Installing base packages (${#missing[@]} missing)" \
     "apt-get install base packages" \
-    "${SUDO[@]}" apt-get install -y "${missing[@]}"
+    "${SUDO[@]}" "${APT_GET[@]}" install -y "${missing[@]}"
 }
 
 # ---- MariaDB dev library (version-aware) -----------------------------------
@@ -74,7 +74,7 @@ install_mariadb_dev_lib() {
     apt_update_once
     run_step "Installing MariaDB development library" \
       "apt-get install libmariadb-dev" \
-      "${SUDO[@]}" apt-get install -y libmariadb-dev
+      "${SUDO[@]}" "${APT_GET[@]}" install -y libmariadb-dev
     return 0
   fi
 
@@ -83,7 +83,7 @@ install_mariadb_dev_lib() {
     apt_update_once
     run_step "Installing MySQL client development library" \
       "apt-get install libmysqlclient-dev" \
-      "${SUDO[@]}" apt-get install -y libmysqlclient-dev
+      "${SUDO[@]}" "${APT_GET[@]}" install -y libmysqlclient-dev
   else
     ui_skip "MySQL client development library (libmysqlclient-dev)"
   fi

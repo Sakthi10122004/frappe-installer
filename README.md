@@ -10,7 +10,8 @@ This project aims to be a production-ready environment manager that handles Frap
 - **Idempotent by Design:** Safe to re-run at any time. It remembers what it has done and skips completed steps.
 - **State Tracking:** Can detect an interrupted installation and resume gracefully.
 - **Strict Isolation:** Uses `uv` for Python and `nvm` for Node.js, ensuring your system environments are never contaminated.
-- **Safety First:** It will **never** drop existing databases, delete users, or modify unrelated MariaDB configurations.
+- **Safety First:** It will **never** drop existing databases, delete users, change MariaDB root's login, or modify unrelated MariaDB configurations. On a socket-auth server it creates its own `frappe_installer_admin@localhost` account instead; the credentials are kept in `~/.frappe-installer/mariadb-admin.cnf` (chmod 600).
+- **External Database:** If MariaDB can't run locally, `--doctor --component mariadb` can point the installer at a remote or Docker MariaDB instead.
 - **Environment Registry:** Keeps track of installed benches and sites in a central JSON registry (`~/.frappe-installer/environments.json`).
 - **Comprehensive Verification:** Verifies 15+ health checks at the end of the installation to ensure the site is truly ready.
 
@@ -45,8 +46,10 @@ cd frappe-installer
   --path PATH          Installation directory. Default: ~/frappe<VERSION>
   --site SITE_NAME     Site name to create. Default: frappe.local
   --non-interactive    Never prompt. Fails automatically instead of asking.
+  --no-animation       Static output (or FRAPPE_INSTALLER_NO_ANIMATION=1; NO_COLOR=1 disables colors)
   --check              System check — make no changes, report status.
-  --doctor             Diagnose common problems and suggest fixes (Coming soon)
+  --env TYPE           Environment type (local or prod). Required with --non-interactive.
+  --doctor             Diagnose problems. Currently: --doctor --component mariadb
   --list               List all detected Frappe environments.
   --dry-run            Simulate installation — make zero changes (Coming soon)
   --repair             Attempt to repair a broken installation (Coming soon)

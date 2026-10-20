@@ -10,8 +10,15 @@ STATE_FILE=""
 
 # ---- Registry management ---------------------------------------------------
 
+# installer_home_init — create ~/.frappe-installer private to this user; state
+# and option files in it hold credentials.
+installer_home_init() {
+  mkdir -p "${INSTALLER_HOME}" "${INSTALLER_STATE_DIR}"
+  chmod 700 "${INSTALLER_HOME}" "${INSTALLER_STATE_DIR}" 2>/dev/null || true
+}
+
 registry_init() {
-  mkdir -p "${INSTALLER_HOME}"
+  installer_home_init
   if [[ ! -f "${INSTALLER_REGISTRY}" ]]; then
     echo '{"environments":[]}' > "${INSTALLER_REGISTRY}"
   fi
@@ -132,7 +139,7 @@ discover_environments() {
     done < <(python3 -c "
 import json, sys
 try:
-    with open('${INSTALLER_REGISTRY}') as f:
+    with open(sys.argv[1]) as f:
         data = json.load(f)
     for env in data.get('environments', []):
         p = env.get('bench_path', '')
@@ -140,7 +147,7 @@ try:
             print(p)
 except Exception:
     pass
-")
+" "${INSTALLER_REGISTRY}")
   fi
 
   # 2. Known paths
@@ -174,9 +181,13 @@ except Exception:
 # ---- Installation state tracking --------------------------------------------
 
 state_init() {
+  installer_home_init
   STATE_FILE="${INSTALLER_STATE_DIR}/install_$(echo -n "${BENCH_DIR}" | md5sum | cut -c1-12).json"
+  # Older versions created state files world-readable (and stored the
+  # MariaDB root password in them).
+  chmod 600 "${INSTALLER_STATE_DIR}"/*.json 2>/dev/null || true
   if [[ ! -f "${STATE_FILE}" ]]; then
-    cat > "${STATE_FILE}" <<'EOF'
+    (umask 077; cat > "${STATE_FILE}") <<'EOF'
 {
   "os_checked": false,
   "dependencies_ready": false,
@@ -200,17 +211,18 @@ EOF
 save_state() {
   [[ -z "${STATE_FILE:-}" ]] && return 0
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "${STATE_FILE}" <<PYEOF
-import json, sys
+    python3 - "${STATE_FILE}" "${BENCH_DIR}" "${SELECTED_FRAPPE_VERSION}" "${SITE_NAME}" <<'PYEOF'
+import json, os, sys
 state_file = sys.argv[1]
+os.umask(0o077)
 try:
     with open(state_file) as f:
         state = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     state = {}
-state["bench_path"] = "${BENCH_DIR}"
-state["frappe_version"] = "${SELECTED_FRAPPE_VERSION}"
-state["site_name"] = "${SITE_NAME}"
+state["bench_path"] = sys.argv[2]
+state["frappe_version"] = sys.argv[3]
+state["site_name"] = sys.argv[4]
 with open(state_file, "w") as f:
     json.dump(state, f, indent=2)
 PYEOF
@@ -223,8 +235,9 @@ update_state() {
   [[ -z "${STATE_FILE:-}" ]] && return 0
   if command -v python3 >/dev/null 2>&1; then
     python3 - "${STATE_FILE}" "${key}" "${value}" <<'PYEOF'
-import json, sys
+import json, os, sys
 state_file, key, value = sys.argv[1], sys.argv[2], sys.argv[3]
+os.umask(0o077)
 val = True if value == "true" else (False if value == "false" else value)
 try:
     with open(state_file) as f:
@@ -349,22 +362,17 @@ select_environment_type() {
     return 1
   fi
 
-  ui_blank
-  ui_line "  Is this a Local Setup or a Production Server?"
-  ui_blank
-  ui_line "  [1] Local Setup (Development/Testing)"
-  ui_line "  [2] Production Server"
-  ui_blank
-
   local choice
-  choice="$(ui_select "Select" "1")"
-  
+  choice="$(ui_select "Is this a Local Setup or a Production Server?" 1 \
+    "Local Setup (Development/Testing)" \
+    "Production Server")"
+
   case "${choice}" in
     1) ENVIRONMENT_TYPE="local" ;;
     2) ENVIRONMENT_TYPE="prod" ;;
     *) fail_fatal "Invalid selection" ; return 1 ;;
   esac
-  
+
   ui_ok "Selected: ${ENVIRONMENT_TYPE} environment"
 }
 

@@ -33,7 +33,9 @@ load_existing_credentials() {
   fi
 
   # Parse credentials using awk (format-aware)
-  MARIADB_ROOT_PASSWORD="$(awk '/MARIADB ROOT/{f=1} f&&/^Password:/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit}' "${source_file}" 2>/dev/null || true)"
+  # Files written by installer <= 2.0.0 hold the MariaDB root password; it is
+  # only used as a fallback login by detect_mariadb_admin_auth.
+  MARIADB_LEGACY_ROOT_PASSWORD="$(awk '/MARIADB ROOT/{f=1} f&&/^Password:/{getline; gsub(/^[[:space:]]+|[[:space:]]+$/, ""); print; exit}' "${source_file}" 2>/dev/null || true)"
   ADMIN_PASSWORD="$(sed -n '/ADMINISTRATOR/,/^---/{/^Password:/{n;s/^[[:space:]]*//;p;q}}' "${source_file}" 2>/dev/null || true)"
   # Also try the FRAPPE ADMINISTRATOR header
   if [[ -z "${ADMIN_PASSWORD}" ]]; then
@@ -49,7 +51,7 @@ load_existing_credentials() {
     FRAPPE_DB_PASSWORD="$(sed -n '/FRAPPE DATABASE/,/^---/{/^Database Password:/{n;s/^[[:space:]]*//;p;q}}' "${source_file}" 2>/dev/null || true)"
   fi
 
-  if [[ -n "${ADMIN_PASSWORD}" || -n "${MARIADB_ROOT_PASSWORD}" ]]; then
+  if [[ -n "${ADMIN_PASSWORD}" || -n "${MARIADB_LEGACY_ROOT_PASSWORD}" ]]; then
     ui_ok "Loaded existing credentials from ${source_file} (preserved, not regenerated)"
   fi
 }
@@ -61,9 +63,9 @@ write_credentials_file() {
   mkdir -p "${cred_dir}"
   CREDENTIALS_FILE="${cred_dir}/${SITE_NAME}.txt"
 
-  local mariadb_root_display="${MARIADB_ROOT_PASSWORD}"
-  if [[ "${MARIADB_ROOT_AUTH_MODE}" == "socket" ]]; then
-    mariadb_root_display="(socket authentication — use: sudo mariadb -u root)"
+  local db_server="local (root login unchanged — use: sudo mariadb -u root)"
+  if [[ -n "${DB_HOST}" ]]; then
+    db_server="${DB_HOST}:${DB_PORT:-3306} (external)"
   fi
 
   # Atomic write: temp file → chmod → verify → rename
@@ -98,14 +100,20 @@ Password:
   ${ADMIN_PASSWORD}
 
 ------------------------------------------------------------
-MARIADB ROOT
+MARIADB ADMIN
 ------------------------------------------------------------
 
+Server:
+  ${db_server}
+
 Username:
-  root
+  ${MARIADB_ADMIN_USER}
 
 Password:
-  ${mariadb_root_display}
+  ${MARIADB_ADMIN_PASSWORD}
+
+Option file (for: mariadb --defaults-extra-file=...):
+  ${MARIADB_ACTIVE_CNF}
 
 ------------------------------------------------------------
 FRAPPE DATABASE

@@ -60,10 +60,10 @@ install_wkhtmltopdf() {
 
   if "${SUDO[@]}" dpkg -i "${tmp_deb}" >> "${LOG_FILE}" 2>&1; then
     # Fix any missing dependencies
-    "${SUDO[@]}" apt-get install -f -y >> "${LOG_FILE}" 2>&1 || true
+    "${SUDO[@]}" "${APT_GET[@]}" install -f -y >> "${LOG_FILE}" 2>&1 || true
     ui_ok "wkhtmltopdf installed (PDF generation ready)"
   else
-    "${SUDO[@]}" apt-get install -f -y >> "${LOG_FILE}" 2>&1 || true
+    "${SUDO[@]}" "${APT_GET[@]}" install -f -y >> "${LOG_FILE}" 2>&1 || true
     # Check if it actually works after dependency fix
     if command -v wkhtmltopdf >/dev/null 2>&1; then
       ui_ok "wkhtmltopdf installed after dependency resolution"

@@ -171,15 +171,27 @@ check_sudo() {
     exit 1
   fi
 
-  # Keep sudo alive for the duration of the script.
-  ( while true; do sudo -n true 2>/dev/null || exit; sleep 60; done ) &
-  disown 2>/dev/null || true
+  # Keep sudo alive for the duration of the script. The loop also stops by
+  # itself once the installer is gone, so the sudo session is never kept
+  # warm after exit even if on_exit could not run (e.g. SIGKILL).
+  local installer_pid=$$
+  ( while kill -0 "${installer_pid}" 2>/dev/null; do
+      sudo -n true 2>/dev/null || exit
+      sleep 60
+    done ) &
+  SUDO_KEEPALIVE_PID=$!
+  disown "${SUDO_KEEPALIVE_PID}" 2>/dev/null || true
 }
 
 # ---- Disk space check -------------------------------------------------------
 
 check_disk_space() {
   local target_dir="${1:-${HOME}}"
+  # The install path usually doesn't exist yet; measure the filesystem it
+  # will be created on.
+  while [[ ! -d "${target_dir}" && "${target_dir}" != "/" ]]; do
+    target_dir="$(dirname "${target_dir}")"
+  done
   local available_mb
   available_mb="$(df -BM --output=avail "${target_dir}" 2>/dev/null | tail -n1 | tr -d ' M' || echo 0)"
 
@@ -212,6 +224,13 @@ check_memory() {
 }
 
 # ---- Port conflict check ----------------------------------------------------
+
+# port_in_use PORT — true if something is listening on PORT.
+port_in_use() {
+  local port="$1"
+  ss -tln 2>/dev/null | grep -q ":${port} " || \
+    netstat -tln 2>/dev/null | grep -q ":${port} "
+}
 
 check_port() {
   local port="${1:-8000}"
@@ -297,5 +316,7 @@ version_major() {
 hosts_entry_present() {
   local file="$1" host="$2"
   [[ -f "${file}" ]] || return 1
-  grep -Eq "^[^#]*[[:space:]]${host}([[:space:]]|\$)" "${file}"
+  # Escape dots so "a.local" doesn't also match "aXlocal".
+  local host_re="${host//./\\.}"
+  grep -Eq "^[^#]*[[:space:]]${host_re}([[:space:]]|\$)" "${file}"
 }

@@ -37,15 +37,13 @@ run_case() {
     # Extract parse_args from install-frappe.sh
     $(sed -n '/^parse_args() {/,/^}/p' install-frappe.sh)
 
-    parse_args ${args} > /tmp/run_mode_\$\$
-    run_mode=\`cat /tmp/run_mode_\$\$\`
-    rm -f /tmp/run_mode_\$\$
+    parse_args ${args}
 
     echo \"INSTALL_PATH=\${INSTALL_PATH}\"
     echo \"SITE_NAME=\${SITE_NAME}\"
     echo \"NON_INTERACTIVE=\${NON_INTERACTIVE}\"
     echo \"SELECTED_FRAPPE_VERSION=\${SELECTED_FRAPPE_VERSION}\"
-    echo \"RUN_MODE=\${run_mode}\"
+    echo \"RUN_MODE=\${RUN_MODE}\"
   " 2>/dev/null
 }
 

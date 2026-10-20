@@ -54,7 +54,12 @@ verify_all() {
   verify_check "Node.js ${required_node}.x active" \
     bash -c "node --version | grep -q '^v${required_node}\\.'"
   verify_check "Yarn present" bash -c "command -v yarn"
-  verify_check "MariaDB running" svc_is_active mariadb
+  if mariadb_is_external; then
+    verify_check "External MariaDB reachable (${DB_HOST}:${DB_PORT:-3306})" \
+      mariadb_exec "SELECT 1;"
+  else
+    verify_check "MariaDB running" svc_is_active mariadb
+  fi
   verify_check "Redis responds to PING" \
     bash -c "[[ \"\$(redis-cli ping)\" == 'PONG' ]]"
   verify_check "Bench CLI works" bash -c "bench --version"
@@ -67,11 +72,11 @@ verify_all() {
   verify_check "Administrator user provisioned" \
     bash -c "cd '${BENCH_DIR}' && bench --site '${SITE_NAME}' mariadb -e \"SELECT name FROM tabUser WHERE name='Administrator';\" | grep -q Administrator"
   verify_check "Frontend assets built" \
-    bash -c "[[ -d '${BENCH_DIR}/sites/assets' ]] && find '${BENCH_DIR}/sites/assets' -name '*.bundle.*' | grep -q ."
+    bash -c "[[ -s '${BENCH_DIR}/sites/assets/assets.json' ]]"
   verify_check "site_config.json valid JSON" \
     bash -c "python3 -c \"import json; json.load(open('${BENCH_DIR}/sites/${SITE_NAME}/site_config.json'))\""
   verify_check "/etc/hosts maps ${SITE_NAME}" \
-    bash -c "grep -Eq '^[^#]*[[:space:]]${SITE_NAME}([[:space:]]|\$)' /etc/hosts"
+    hosts_entry_present /etc/hosts "${SITE_NAME}"
 
   # Warning-level checks (failures = READY_WITH_WARNINGS)
   if command -v wkhtmltopdf >/dev/null 2>&1; then
@@ -92,42 +97,78 @@ verify_all() {
 
 _verify_http_health() {
   local http_ok=0
-  local bench_pid_file="/tmp/frappe_bench_verify_$$.pid"
 
-  # Start bench briefly in the background
-  (
-    cd "${BENCH_DIR}"
-    nohup bench start >> "${LOG_FILE}" 2>&1 &
-    echo $! > "${bench_pid_file}"
-  )
+  # Never kill someone else's server: if 8000 is taken, the probe would only
+  # be talking to that process anyway.
+  if port_in_use 8000; then
+    ui_warn "HTTP health check skipped: port 8000 is used by another process"
+    ui_line "  ${C_DIM}Free the port, then: cd \"${BENCH_DIR}\" && bench start${C_RESET}"
+    VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+    return 0
+  fi
 
-  local bench_pid=""
-  sleep 1
-  bench_pid="$(cat "${bench_pid_file}" 2>/dev/null || echo '')"
-  rm -f "${bench_pid_file}"
+  nvm_load
+  ensure_free_socketio_port 2>/dev/null || true
 
-  if [[ -n "${bench_pid}" ]]; then
-    local i=0 code=""
-    while [[ ${i} -lt 30 ]]; do
-      code="$(curl -s -o /dev/null -w '%{http_code}' \
-        -H "Host: ${SITE_NAME}" "http://127.0.0.1:8000" 2>/dev/null || echo '000')"
-      [[ "${code}" =~ ^(200|301|302|303)$ ]] && { http_ok=1; break; }
-      sleep 1
-      i=$((i + 1))
-    done
+  # Primary Method: bench start
+  _start_probe_server bench start
+  _wait_for_http 15 && http_ok=1
+  _stop_probe_server
 
-    # Stop bench
-    pkill -P "${bench_pid}" 2>/dev/null || true
-    kill "${bench_pid}" 2>/dev/null || true
-    wait "${bench_pid}" 2>/dev/null || true
+  # Fallback Method: direct bench serve probe if bench start didn't respond
+  if [[ "${http_ok}" -ne 1 ]]; then
+    _start_probe_server bench --site "${SITE_NAME}" serve --port 8000
+    _wait_for_http 10 && http_ok=1
+    _stop_probe_server
   fi
 
   if [[ "${http_ok}" -eq 1 ]]; then
-    ui_ok "HTTP health check (site responded with ${code})"
+    ui_ok "HTTP health check (site responded with ${HTTP_PROBE_CODE})"
   else
-    ui_fail "HTTP health check (site did not respond within 30s)"
+    ui_fail "HTTP health check (site did not respond within timeout)"
     VERIFY_FAILURES=$((VERIFY_FAILURES + 1))
   fi
+}
+
+PROBE_PID=""
+HTTP_PROBE_CODE=""
+
+# _start_probe_server CMD... — run CMD from the bench in its own process
+# group (setsid), so the server and everything it spawns (honcho, web,
+# socketio, workers, redis) can be stopped together and nothing else.
+_start_probe_server() {
+  (
+    cd "${BENCH_DIR}"
+    exec setsid "$@" >> "${LOG_FILE}" 2>&1 < /dev/null
+  ) &
+  PROBE_PID=$!
+}
+
+_stop_probe_server() {
+  [[ -n "${PROBE_PID}" ]] || return 0
+  kill -TERM -- "-${PROBE_PID}" 2>/dev/null || kill -TERM "${PROBE_PID}" 2>/dev/null || true
+  local i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 -- "-${PROBE_PID}" 2>/dev/null || break
+    sleep 0.5
+  done
+  kill -KILL -- "-${PROBE_PID}" 2>/dev/null || true
+  wait "${PROBE_PID}" 2>/dev/null || true
+  PROBE_PID=""
+}
+
+# _wait_for_http SECONDS — poll the site until it answers or time runs out.
+_wait_for_http() {
+  local tries="$1" i=0
+  sleep 1
+  while [[ ${i} -lt ${tries} ]]; do
+    HTTP_PROBE_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
+      -H "Host: ${SITE_NAME}" "http://127.0.0.1:8000" 2>/dev/null || echo '000')"
+    [[ "${HTTP_PROBE_CODE}" =~ ^(200|301|302|303)$ ]] && return 0
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
 }
 
 # ---- Determine health state -------------------------------------------------
@@ -154,7 +195,7 @@ print_final_output() {
   case "${health_state}" in
     READY|READY_WITH_WARNINGS)
       ui_success_banner "${SELECTED_FRAPPE_VERSION}"
-      ui_line "Installation successful."
+      ui_stage_timeline
       ;;
     PARTIAL)
       ui_success_banner "${SELECTED_FRAPPE_VERSION}"
@@ -189,11 +230,12 @@ print_final_output() {
 
   # Database credentials
   ui_summary_header "DATABASE"
-  if [[ "${MARIADB_ROOT_AUTH_MODE}" == "password" ]]; then
-    ui_line "  MariaDB Root: (see credentials file)"
+  if [[ -n "${DB_HOST}" ]]; then
+    ui_line "  MariaDB Server: ${DB_HOST}:${DB_PORT:-3306} (external)"
   else
-    ui_line "  MariaDB Root: (socket authentication — use: sudo mariadb -u root)"
+    ui_line "  MariaDB Root: unchanged (use: sudo mariadb -u root)"
   fi
+  ui_line "  MariaDB Admin: ${MARIADB_ADMIN_USER} (password in credentials file)"
   ui_line "  Frappe DB User: ${FRAPPE_DB_USER}"
   ui_line "  Frappe DB Password: (see credentials file)"
 

@@ -54,10 +54,20 @@ on_interrupt() {
 # ---- Trap: EXIT (always runs) ----------------------------------------------
 
 on_exit() {
-  if [[ -n "${SPINNER_PID:-}" ]] && kill -0 "${SPINNER_PID}" 2>/dev/null; then
+  if [[ -n "${SPINNER_PID:-}" ]]; then
     kill "${SPINNER_PID}" 2>/dev/null || true
   fi
-  [[ -t 1 ]] && tput cnorm 2>/dev/null || true
+  if [[ -n "${SUDO_KEEPALIVE_PID:-}" ]]; then
+    kill "${SUDO_KEEPALIVE_PID}" 2>/dev/null || true
+  fi
+  # Temporary bench Redis servers started for migrate/build.
+  if declare -F bench_redis_stop >/dev/null 2>&1; then
+    bench_redis_stop 2>/dev/null || true
+  fi
+  if [[ -t 1 ]]; then
+    tput cnorm 2>/dev/null || true
+  fi
+  return 0
 }
 
 # ---- Install traps ----------------------------------------------------------
