@@ -7,7 +7,7 @@
 
 # ---- Script metadata -------------------------------------------------------
 INSTALLER_NAME="install-frappe.sh"
-INSTALLER_VERSION="2.0.0"
+INSTALLER_VERSION="0.0.1"
 INSTALLER_CODENAME="frappe-installer"
 
 # ---- Registry / state paths ------------------------------------------------
