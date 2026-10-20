@@ -54,7 +54,7 @@ for path in sorted(glob.glob(os.path.join(state_dir, "install_*.json"))):
     updated = st.get("updated_at") or int(os.path.getmtime(path))
     fields = [path, bench, str(st.get("frappe_version", "")), st.get("site_name", ""),
               st.get("environment_type", ""), st.get("install_mode", ""), stage,
-              str(updated), "1" if st.get("interrupted") else "0"]
+              str(updated), "1" if st.get("interrupted") else ("2" if st.get("failed") else "0")]
     print("\x1f".join(f.replace("\x1f", " ") for f in fields))
 PYEOF
 }
@@ -81,6 +81,7 @@ resume_wizard() {
     local when verb="Last active"
     when="$(ui_ago "${f[7]}")"
     if [[ "${f[8]}" == "1" ]]; then verb="Paused"; fi
+    if [[ "${f[8]}" == "2" ]]; then verb="Failed"; fi
     cards+=("Continue|Frappe ${f[2]:-?}${f[4]:+ · ${f[4]}}|$(ui_short_path "${f[1]}")|Stopped at: ${f[6]}|${verb} ${when}")
   done
   cards+=("Start fresh|Forget saved progress|Files on disk are kept" "Exit")

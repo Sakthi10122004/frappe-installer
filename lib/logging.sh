@@ -81,6 +81,8 @@ run_logged() {
   else
     local rc=$?
     echo "---- FAILED (exit ${rc}): ${desc} ----" >> "${LOG_FILE}"
+    LAST_FAILED_STEP="${desc}"
+    LAST_FAILED_CMD="$(_mask_secrets "$*")"
     return "${rc}"
   fi
 }

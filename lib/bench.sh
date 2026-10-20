@@ -79,7 +79,6 @@ init_bench() {
     "bench init" \
     env UV_PYTHON="${required_python}" bench init \
       --frappe-branch "${FRAPPE_BRANCH}" \
-      --depth 1 \
       "${BENCH_SUBDIR}"
 
   is_valid_bench_dir "${BENCH_DIR}" || {

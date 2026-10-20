@@ -1005,12 +1005,20 @@ ui_interrupt_banner() {
 
 # ---- Failure banner ---------------------------------------------------------
 
+# ui_failure_banner [STAGE] [STEP] [REASON]
 ui_failure_banner() {
+  local stage="${1:-}" step="${2:-}" reason="${3:-}"
+  local -a lines=("" "${C_BOLD}${C_RED}✘  INSTALLATION FAILED${C_RESET}" "")
+  if [[ -n "${stage}" ]]; then
+    lines+=("${C_DIM}Stage   ${C_RESET}${C_BOLD}${stage}${C_RESET}")
+  fi
+  if [[ -n "${step}" ]]; then
+    lines+=("${C_DIM}Step    ${C_RESET}${step}")
+  fi
+  if [[ -n "${reason}" ]]; then
+    lines+=("${C_DIM}Reason  ${C_RESET}${C_YELLOW}${reason}${C_RESET}")
+  fi
+  lines+=("" "${C_GREEN}✔${C_RESET} Nothing was rolled back or deleted — re-running is safe" "")
   ui_blank
-  ui_box "${C_RED}" \
-    "" \
-    "${C_BOLD}${C_RED}✘  INSTALLATION FAILED${C_RESET}" \
-    "" \
-    "${C_DIM}Nothing was rolled back or deleted — re-running is safe.${C_RESET}" \
-    ""
+  ui_box "${C_RED}" "${lines[@]}"
 }

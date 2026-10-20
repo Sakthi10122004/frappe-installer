@@ -8,28 +8,56 @@
 
 on_error() {
   local exit_code=$? line_no=$1 cmd=$2
+  trap - ERR
   spinner_stop fail "" >/dev/null 2>&1 || true
   [[ -t 1 ]] && tput cnorm 2>/dev/null || true
 
-  ui_failure_banner
+  # Prefer the step the user saw fail over the internal line that noticed it.
+  local step="${LAST_FAILED_STEP:-}" shown_cmd="${LAST_FAILED_CMD:-${cmd}}" reason="" section=""
+  if [[ -n "${step}" && -n "${LOG_FILE:-}" && -f "${LOG_FILE}" ]]; then
+    section="$(_failed_step_log "${step}")"
+    reason="$(printf '%s\n' "${section}" \
+      | grep -iE '(error|fatal|exception|traceback|no such|not found|denied|refused|cannot|failed)' \
+      | grep -v '^---- ' | tail -n 1 | cut -c1-90)"
+  fi
 
-  ui_line "Stage:   ${CURRENT_STAGE:-unknown (pre-flight)}"
-  ui_line "Command: ${cmd}"
-  ui_line "Line:    ${line_no}"
-  ui_line "Exit:    ${exit_code}"
+  # Remember the failure, so the next run offers to continue from here.
+  if declare -F update_state >/dev/null 2>&1 && [[ -n "${STATE_FILE:-}" ]]; then
+    save_state 2>/dev/null || true
+    update_state "last_stage" "${CURRENT_STAGE:-}" 2>/dev/null || true
+    update_state "failed" "true" 2>/dev/null || true
+  fi
 
+  ui_failure_banner "${CURRENT_STAGE:-startup}" "${step}" "${reason}"
+
+  ui_line "  ${C_DIM}Command:${C_RESET} ${shown_cmd}"
+  [[ -z "${step}" ]] && ui_line "  ${C_DIM}Line:    ${line_no} (exit ${exit_code})${C_RESET}"
   if [[ -n "${LOG_FILE:-}" && -f "${LOG_FILE:-}" ]]; then
-    ui_line "Log:     ${LOG_FILE}"
+    ui_line "  ${C_DIM}Log:${C_RESET}     ${LOG_FILE}"
     ui_blank
-    ui_line "${C_DIM}Last 25 lines of log:${C_RESET}"
-    tail -n 25 "${LOG_FILE}" | sed 's/^/    /'
+    if [[ -n "${section}" ]]; then
+      ui_line "  ${C_DIM}Output of this step (last 15 lines):${C_RESET}"
+      printf '%s\n' "${section}" | tail -n 15 | sed 's/^/    │ /'
+    else
+      ui_line "  ${C_DIM}Last 15 lines of log:${C_RESET}"
+      tail -n 15 "${LOG_FILE}" | sed 's/^/    │ /'
+    fi
   fi
 
   ui_blank
-  ui_line "The installer has stopped safely. No further changes were made."
-  ui_line "Fix the issue above and re-run: ./${INSTALLER_NAME}"
-  ui_line "Re-running is safe — completed steps will be detected and skipped."
+  ui_line "  ${C_CYAN}↻${C_RESET} Fix the issue above and re-run ${C_BOLD}./${INSTALLER_NAME}${C_RESET} — it offers to continue from here."
   exit "${exit_code}"
+}
+
+# _failed_step_log DESC — the log lines written by the last run of step DESC
+# (between its "---- DESC ----" header and its FAILED footer).
+_failed_step_log() {
+  awk -v hdr="---- $1 ----" '
+    $0 == hdr { buf = ""; on = 1; next }
+    on && /^---- FAILED/ { on = 0; out = buf; next }
+    on { buf = buf $0 "\n" }
+    END { printf "%s", (out != "" ? out : buf) }
+  ' "${LOG_FILE}" | grep -v '^+ ' | sed '/^[[:space:]]*$/d'
 }
 
 # ---- Trap: INT/TERM (Ctrl+C, kill) -----------------------------------------

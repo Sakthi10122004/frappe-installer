@@ -219,6 +219,7 @@ state_init() {
   chmod 600 "${INSTALLER_STATE_DIR}"/*.json 2>/dev/null || true
   if [[ -f "${STATE_FILE}" ]]; then
     update_state "interrupted" "false"
+    update_state "failed" "false"
   else
     (umask 077; cat > "${STATE_FILE}") <<'EOF'
 {
