@@ -663,8 +663,8 @@ detect_mariadb_admin_auth() {
 
   local auth_choice
   auth_choice="$(ui_select "How would you like to proceed?" 1 \
-    "Enter the password of an existing MariaDB admin account" \
-    "Reset root to socket authentication (briefly restarts MariaDB)" \
+    "Enter a password|For an existing admin account|Nothing on the server changes" \
+    "Reset root login|Back to sudo (socket) login|Briefly restarts MariaDB" \
     "Exit")"
 
   case "${auth_choice}" in

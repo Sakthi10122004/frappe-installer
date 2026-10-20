@@ -322,9 +322,9 @@ check_resume() {
 
   local choice
   choice="$(ui_select "What would you like to do?" 1 \
-    "Resume installation" \
-    "Inspect current state" \
-    "Start a new environment" \
+    "Resume|Continue the install|Finished steps are skipped" \
+    "Inspect|Show stage checklist|Then exit, nothing changes" \
+    "Start fresh|Reset progress tracking|Existing files are kept" \
     "Exit")"
 
   case "${choice}" in
@@ -363,17 +363,15 @@ select_environment_type() {
   fi
 
   local choice
-  choice="$(ui_select "Is this a Local Setup or a Production Server?" 1 \
-    "Local Setup (Development/Testing)" \
-    "Production Server")"
+  choice="$(ui_select "Where will this Frappe run?" 1 \
+    "Local Setup|Development & testing|bench start on port 8000|Site mapped in /etc/hosts" \
+    "Production Server|Serving real users|Same install as Local today|nginx/supervisor: manual")"
 
   case "${choice}" in
     1) ENVIRONMENT_TYPE="local" ;;
     2) ENVIRONMENT_TYPE="prod" ;;
     *) fail_fatal "Invalid selection" ; return 1 ;;
   esac
-
-  ui_ok "Selected: ${ENVIRONMENT_TYPE} environment"
 }
 
 # ---- Frappe version selection -----------------------------------------------
@@ -393,8 +391,8 @@ select_frappe_version() {
 
   local choice
   choice="$(ui_select "Which Frappe Framework version do you want?" 1 \
-    "Frappe 16 (recommended)" \
-    "Frappe 15" \
+    "Frappe 16|Recommended · newest|Python ${FRAPPE_16_CONFIG[python]} · Node ${FRAPPE_16_CONFIG[node]}|MariaDB ${FRAPPE_16_CONFIG[mariadb_recommended]}+|Supported to ${FRAPPE_16_CONFIG[eol]:0:4}" \
+    "Frappe 15|Stable · widely used|Python ${FRAPPE_15_CONFIG[python]} · Node ${FRAPPE_15_CONFIG[node]}|MariaDB ${FRAPPE_15_CONFIG[mariadb_recommended]}+|Supported to ${FRAPPE_15_CONFIG[eol]:0:4}" \
     "Exit")"
 
   case "${choice}" in

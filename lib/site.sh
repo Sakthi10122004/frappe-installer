@@ -142,9 +142,9 @@ create_site() {
     fi
 
     local choice
-    choice="$(ui_select "What would you like to do?" 1 \
-      "Use existing site" \
-      "Create a different site" \
+    choice="$(ui_select "Site ${SITE_NAME} already exists. What now?" 1 \
+      "Use existing site|Keep it and its data|Checks the DB connection" \
+      "New site|Pick another name|Existing site untouched" \
       "Exit")"
 
     case "${choice}" in
@@ -157,8 +157,8 @@ create_site() {
 
           local fix_choice
           fix_choice="$(ui_select "How would you like to fix this?" 1 \
-            "Recreate site (old site folder is archived, then a fresh site is created)" \
-            "Exit and fix manually")"
+            "Recreate site|Fresh site, same name|Old folder → archived/sites" \
+            "Exit")"
 
           case "${fix_choice}" in
             1)
