@@ -50,6 +50,12 @@ heal_step() {
     "${SUDO[@]}" "${APT_GET[@]}" update -y >> "${LOG_FILE}" 2>&1 || true
     APT_UPDATED=1
 
+  elif _seen "zoneinfonotfounderror|no time zone found with key"; then
+    fix="time-zone data was missing — installed tzdata (and tzdata-legacy for old names like Asia/Calcutta)"
+    local -a tz=(tzdata)
+    if apt-cache policy tzdata-legacy 2>/dev/null | grep -qE "Candidate: [0-9]"; then tz+=(tzdata-legacy); fi
+    "${SUDO[@]}" "${APT_GET[@]}" install -y "${tz[@]}" >> "${LOG_FILE}" 2>&1 || true
+
   elif _seen "could not resolve|temporary failure in name resolution|timed? ?out|connection (reset|refused|closed)|network is unreachable|econnreset|etimedout|eai_again|socket hang up|remote end hung up|early eof|rpc failed|ssl_error|ssl connect error|tls handshake timeout|unexpected eof while reading|http (502|503|504)|status code (502|503|504)|failed to fetch|readtimeouterror|connectionerror|could not connect"; then
     fix="network glitch — waited and retrying"
     _heal_wait $(( 10 * attempt ))

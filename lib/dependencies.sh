@@ -107,6 +107,28 @@ install_mariadb_dev_lib() {
   fi
 }
 
+# ---- Optional packages (only where the OS has them) ----------------------------
+# tzdata-legacy: old time-zone names (e.g. Asia/Calcutta) moved out of tzdata
+# into this package on Ubuntu 24.04+/Debian 13+. Frappe 15 sites often use
+# such names (Frappe 15 used pytz, which still knows them); Frappe 16 reads
+# the system's zone files and fails without them ("No time zone found").
+
+OPTIONAL_PACKAGES=(tzdata-legacy)
+
+install_optional_packages() {
+  local p
+  local -a wanted=()
+  for p in "${OPTIONAL_PACKAGES[@]}"; do
+    dpkg -s "${p}" >/dev/null 2>&1 && continue
+    if apt-cache policy "${p}" 2>/dev/null | grep -qE "Candidate: [0-9]"; then
+      wanted+=("${p}")
+    fi
+  done
+  if [[ "${#wanted[@]}" -gt 0 ]]; then
+    apt_install_missing "${wanted[@]}"
+  fi
+}
+
 # ---- Interrupted package installs -------------------------------------------
 # Ctrl+C during apt can leave packages half-configured, and every later apt
 # call then fails until `dpkg --configure -a` runs. Finish that first.
@@ -128,6 +150,7 @@ resolve_dependencies() {
 
   repair_interrupted_dpkg
   install_base_packages
+  install_optional_packages
   install_mariadb_dev_lib
 
   update_state "dependencies_ready" "true"

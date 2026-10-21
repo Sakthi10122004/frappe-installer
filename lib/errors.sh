@@ -125,7 +125,7 @@ failure_hints() {
     _hint "Your bench CLI is a different version than expected. Update it with: uv tool upgrade frappe-bench"
   fi
   if _has "zoneinfo|no time zone found"; then
-    _hint "Time-zone data is missing. Install it with: sudo apt-get install -y tzdata"
+    _hint "Time-zone data is missing (old names like Asia/Calcutta live in tzdata-legacy on newer Ubuntu/Debian). Install it: sudo apt-get install -y tzdata tzdata-legacy"
   fi
   if _has "requires-python|syntaxerror|python version|unsupported python"; then
     _hint "Wrong Python version for this Frappe release. Re-run so the installer can rebuild the environment with the right Python."

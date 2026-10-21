@@ -118,6 +118,23 @@ resume_wizard() {
 
 # ---- Existing benches ---------------------------------------------------------
 
+# bench_state_get BENCH KEY — a value from BENCH's state file (empty if none).
+bench_state_get() {
+  local file
+  file="${INSTALLER_STATE_DIR}/install_$(echo -n "$1" | md5sum | cut -c1-12).json"
+  [[ -f "${file}" ]] || return 0
+  python3 -c 'import json,sys
+try: v = json.load(open(sys.argv[1])).get(sys.argv[2], "")
+except Exception: v = ""
+print("true" if v is True else ("false" if v is False else v))' "${file}" "$2" 2>/dev/null || true
+}
+
+# upgrade_unfinished BENCH — a 15 → 16 upgrade was started on BENCH and never
+# completed (its code is already on version-16, so it now looks like v16).
+upgrade_unfinished() {
+  [[ "$(bench_state_get "$1" install_mode)" == "upgrade" && -z "$(bench_state_get "$1" upgraded_to)" ]]
+}
+
 # apply_cli_action — `--action keep|update|upgrade` for scripted runs: the
 # bench is --path's bench, or the only bench on the machine.
 apply_cli_action() {
@@ -140,7 +157,7 @@ apply_cli_action() {
   local ver
   ver="$(detect_bench_frappe_version "${bench}")"
   if [[ "${CLI_ACTION}" == "upgrade" ]]; then
-    if [[ "${ver}" != "15" ]]; then
+    if [[ "${ver}" != "15" ]] && ! upgrade_unfinished "${bench}"; then
       fail_fatal "--action upgrade supports Frappe 15 → 16; this bench is Frappe ${ver}."
       exit 2
     fi
@@ -209,6 +226,11 @@ existing_environment_wizard() {
       keys+=(upgrade)
       ;;
     16)
+      if upgrade_unfinished "${bench}"; then
+        # Offered first: the 15 → 16 upgrade stopped part-way.
+        actions=("Finish upgrade|The 15 → 16 upgrade stopped|Backup, migrate, build|Done steps are skipped" "${actions[@]}")
+        keys=(upgrade "${keys[@]}")
+      fi
       actions+=("Downgrade to 15|Not possible in place|Installs 15 alongside|This bench stays as is")
       keys+=(downgrade)
       ;;
@@ -229,7 +251,7 @@ existing_environment_wizard() {
       SITE_NAME="$(bench_default_site "${bench}")"
       SELECTED_FRAPPE_VERSION="${ver}"
       if [[ "${INSTALL_MODE}" == "upgrade" ]]; then
-        UPGRADE_FROM_VERSION="${ver}"
+        UPGRADE_FROM_VERSION=15     # the only upgrade path (also when finishing one)
         SELECTED_FRAPPE_VERSION=16
         ui_info "Upgrade plan: back up every site → switch to version-16 → rebuild Python env → migrate → build."
       fi

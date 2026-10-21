@@ -52,6 +52,16 @@ reset
 run_step "Installing packages" "apt-get install x" flaky 1 "E: Could not get lock /var/lib/dpkg/lock-frontend" >/dev/null
 assert_eq "apt lock: waited and retried" "0 2" "$? $(attempts)"
 
+reset
+APT_CALLS="${TMP}/apt"
+APT_GET=(apt_spy); apt_spy() { echo "$*" >> "${APT_CALLS}"; }
+apt-cache() { echo "  Candidate: 2026e-0ubuntu1"; }       # tzdata-legacy is available
+run_step "Migrating all sites" "bench migrate" flaky 1 \
+  "zoneinfo._common.ZoneInfoNotFoundError: 'No time zone found with key Asia/Calcutta'" >/dev/null
+assert_eq "old time-zone name (15 → 16 upgrade): fixed and migrate retried" "0 2" "$? $(attempts)"
+assert_eq "installed tzdata + tzdata-legacy" "install -y tzdata tzdata-legacy" "$(cat "${APT_CALLS}")"
+APT_GET=(true); unset -f apt-cache
+
 echo "== limits =="
 reset
 run_step "Installing uv" "install uv" flaky 99 "Connection timed out" >/dev/null
