@@ -1,6 +1,6 @@
 {
   "name": "create-frappe",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Install the Frappe Framework (v15/v16) on Ubuntu/Debian — local or production, resumable, verified. Run: npm create frappe",
   "keywords": [
     "frappe",
