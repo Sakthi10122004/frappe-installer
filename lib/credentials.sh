@@ -68,8 +68,10 @@ write_credentials_file() {
     admin_display="(unchanged — this site existed before; reset with: bench --site ${SITE_NAME} set-admin-password)"
   fi
 
-  local db_server="local (root login unchanged — use: sudo mariadb -u root)"
-  if [[ -n "${DB_HOST}" ]]; then
+  local db_server="shared local server (root login unchanged — use: sudo mariadb -u root)"
+  if [[ "${DB_MODE}" == "instance" ]]; then
+    db_server="own instance $(db_instance_unit) at 127.0.0.1:${DB_INSTANCE_PORT} (root: sudo mariadb --socket=$(db_instance_socket))"
+  elif [[ -n "${DB_HOST}" ]]; then
     db_server="${DB_HOST}:${DB_PORT:-3306} (external)"
   fi
 
@@ -92,7 +94,10 @@ Site:
   ${SITE_NAME}
 
 URL:
-  http://${SITE_NAME}:8000
+  http://${SITE_NAME}:${WEB_PORT}
+
+Environment:
+  ${ENV_ID} — start it with: cd ${BENCH_DIR} && ./start
 
 ------------------------------------------------------------
 ADMINISTRATOR

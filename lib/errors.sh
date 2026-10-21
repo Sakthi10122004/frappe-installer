@@ -95,6 +95,9 @@ failure_hints() {
   if _has "access denied for user"; then
     _hint "MariaDB rejected the login. Run: ${INSTALLER_RERUN} --doctor --component mariadb (it checks the saved admin account)."
   fi
+  if _has "frappe-db@[a-z0-9-]+"; then
+    _hint "This environment's own database did not start. See why with: sudo journalctl -u frappe-db@${ENV_ID:-<id>} -n 50  (and /var/log/frappe-mariadb/)"
+  fi
   if _has "mariadb service could not be started|mariadb.service failed|can't connect to local (mysql|mariadb) server"; then
     _hint "MariaDB is not running. See why with: sudo journalctl -u mariadb -n 50, or run ${INSTALLER_RERUN} --doctor --component mariadb"
   fi
@@ -103,6 +106,9 @@ failure_hints() {
   fi
   if _has "not compatible with the .*npm_config|npmrc.*(prefix|globalconfig)"; then
     _hint "npm settings conflict with nvm. Run the installer directly from a terminal (not inside an npm script), or remove 'prefix=' from ~/.npmrc."
+  fi
+  if _has "engine \"node\" is incompatible|expected version \">=[0-9]+"; then
+    _hint "The wrong Node.js version is active. Open a new terminal (or run: source ~/.bashrc), check node -v, or run: nvm use ${FRAPPE_CONFIG[node]:-24}"
   fi
   if _has "no such option|got unexpected extra argument"; then
     _hint "Your bench CLI is a different version than expected. Update it with: uv tool upgrade frappe-bench"

@@ -1003,6 +1003,17 @@ ui_success_banner() {
       lines+=("  ${C_YELLOW}⚠${C_RESET} ${wline:0:$(( $(_ui_box_width) - 4 ))}")
     done
   fi
+  if [[ "${#VERIFY_NOTES[@]}" -gt 0 ]]; then
+    lines+=("" "${C_BOLD}${C_CYAN}BEFORE YOU START${C_RESET}")
+    local note nline first
+    for note in "${VERIFY_NOTES[@]}"; do
+      first=1
+      while IFS= read -r nline; do
+        if [[ "${first}" -eq 1 ]]; then lines+=("  ${C_CYAN}→${C_RESET} ${nline}"); first=0
+        else lines+=("    ${nline}"); fi
+      done < <(_ui_wrap "${note}" $(( $(_ui_box_width) - 4 )))
+    done
+  fi
   lines+=("" "${C_BOLD}START USING IT${C_RESET}")
   [[ -n "${url}" ]] && lines+=("  ${C_DIM}Open   ${C_RESET} ${C_BOLD}${C_CYAN}${url}${C_RESET}")
   lines+=("  ${C_DIM}Login  ${C_RESET} Administrator ${C_DIM}· password in the credentials file below${C_RESET}")

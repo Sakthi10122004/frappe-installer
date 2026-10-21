@@ -88,6 +88,53 @@ Releases are published from CI only after the full test matrix passes, with
   -h, --help           Show help and exit
 ```
 
+## Isolated Environments
+
+Every install is its own **environment** (e.g. `frappe16-2`). Installing one never
+changes another Frappe install or its data — and the installer proves it at the end.
+
+```
+SYSTEM LAYER (shared)        apt packages · MariaDB/Redis/nginx binaries · nvm · uv
+  rule: add only             installed if missing; never upgraded, reconfigured or removed
+ENVIRONMENT LAYER (owned)    one per install — nothing shared between environments:
+                               bench folder + Python venv
+                               Node.js pinned in .nvmrc, started with ./start
+                               own MariaDB instance  frappe-db@<id>  127.0.0.1:33xx
+                               own Redis (cache + queue) and own web/socketio ports
+SITE LAYER (Frappe)          one database per site, never dropped
+```
+
+| | Each environment gets | Where |
+|---|---|---|
+| Ports | web 800N · socketio 900N · Redis 1300N/1100N · DB 330(6+N) | `~/.frappe-installer/environments.json` |
+| Database | its own MariaDB server process, data, socket, logs, admin login | `frappe-db@<id>`, `/var/lib/frappe-mariadb/<id>`, `~/.frappe-installer/envs/<id>/` |
+| Node.js | the version its Frappe needs, without changing nvm's default | `<bench>/.nvmrc`, `<bench>/start` |
+| Production | its own supervisor programs and nginx config (bench folder `<id>-bench`) | `/etc/supervisor/conf.d/`, `/etc/nginx/conf.d/` |
+
+**Guarantees**
+- Other benches are read-only. Only a bench you explicitly choose (Keep / Update / Upgrade) is modified.
+- A new environment never connects to the system's own MariaDB server, so its settings
+  (e.g. the faster local write mode), restarts and accounts can't affect existing databases.
+- The summary lists what will *not* be touched; after installing, a check compares
+  fingerprints of every other environment (and the shared MariaDB config) with the ones
+  taken beforehand.
+- Benches made before environments existed keep working exactly as they are (default
+  ports, shared MariaDB server).
+
+Start an environment: `cd <bench> && ./start` (uses the right Node.js automatically).
+
+Remove an environment completely:
+
+```bash
+id=frappe16-2; bench=~/frappe16-2/frappe-bench          # from environments.json
+sudo systemctl disable --now "frappe-db@${id}"
+sudo rm -rf "/var/lib/frappe-mariadb/${id}" "/etc/frappe-mariadb/${id}.cnf"
+rm -rf "${bench}" ~/.frappe-installer/envs/"${id}"
+# production only:
+sudo rm -f /etc/nginx/conf.d/"$(basename "${bench}")".conf /etc/supervisor/conf.d/"$(basename "${bench}")".conf
+sudo supervisorctl update && sudo systemctl reload nginx
+```
+
 ## Production Deployment
 
 Run as a regular user with sudo (not root), on a server whose DNS points at it:
@@ -136,6 +183,8 @@ The project has been heavily refactored from a monolithic script into modular co
 - `lib/bench.sh`: Bench CLI installation and `bench init`.
 - `lib/site.sh`: Site creation, hosts file mapping, and database migrations.
 - `lib/download.sh`: HTTPS-only downloads with SHA-256 verification.
+- `lib/isolation.sh`: environments — ids, port allocation, `./start`, isolation proof.
+- `lib/db_instance.sh`: a private MariaDB instance per environment (`frappe-db@<id>`).
 - `lib/lifecycle.sh`: Resume offer, existing-install actions, update and upgrade flows.
 - `lib/production.sh`: supervisor, nginx, HTTPS, firewall and production verification.
 - `lib/credentials.sh`: Atomic, secure credential generation in `<bench>/credentials/`.
@@ -157,4 +206,4 @@ tests/e2e/run.sh ubuntu:24.04 16 prod -- --domain erp.example.test --no-firewall
 THEN="--action upgrade --version 16 --path /home/frappe/frappe15" tests/e2e/run.sh ubuntu:24.04 15 local
 ```
 
-CI (`.github/workflows/ci.yml`) runs shellcheck and the unit tests on every push, then the end-to-end matrix: Frappe 15 on Ubuntu 22.04 and Debian 12, Frappe 16 local and production on Ubuntu 24.04, and a 15 → 16 upgrade.
+CI (`.github/workflows/ci.yml`) runs shellcheck and the unit tests on every push, then the end-to-end matrix: Frappe 15 on Ubuntu 22.04 and Debian 12, Frappe 16 local and production on Ubuntu 24.04, a 15 → 16 upgrade, two environments side by side (isolation), and an install started through `npm create`.

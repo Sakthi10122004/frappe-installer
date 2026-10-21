@@ -414,7 +414,7 @@ select_environment_type() {
 
   local choice
   choice="$(ui_select "Where will this Frappe run?" 1 \
-    "Local Setup|Development & testing|bench start on port 8000|Site mapped in /etc/hosts" \
+    "Local Setup|Development & testing|Own ports & own database|Other installs untouched" \
     "Production Server|Serving real users|nginx + supervisor + HTTPS|Firewall, fail2ban, backups")"
 
   case "${choice}" in

@@ -64,6 +64,7 @@ verify_all() {
   VERIFY_WARNING_LIST=()
   VERIFY_FAILED_LIST=()
   VERIFY_HIGHLIGHTS=()
+  VERIFY_NOTES=()
 
   cd "${BENCH_DIR}"
   export PATH="${HOME}/.local/bin:${PATH}"
@@ -79,12 +80,20 @@ verify_all() {
     bash -c "uv python find ${required_python}"
   verify_check "Node.js ${required_node}.x active" \
     bash -c "node --version | grep -q '^v${required_node}\\.'"
+  if [[ "${ENVIRONMENT_TYPE:-}" != "prod" ]]; then
+    _verify_terminal_node "${required_node}"
+  fi
   verify_check "Yarn present" bash -c "command -v yarn"
   if mariadb_is_external; then
     verify_check "External MariaDB reachable (${DB_HOST}:${DB_PORT:-3306})" \
       mariadb_exec "SELECT 1;"
   else
-    verify_check "MariaDB running" svc_is_active mariadb
+    if [[ "${DB_MODE}" == "instance" ]]; then
+      verify_check "Own database instance running ($(db_instance_unit), 127.0.0.1:${DB_INSTANCE_PORT})" \
+        svc_is_active "$(db_instance_unit)"
+    else
+      verify_check "MariaDB running" svc_is_active mariadb
+    fi
   fi
   verify_check "Redis responds to PING" \
     bash -c "[[ \"\$(redis-cli ping)\" == 'PONG' ]]"
@@ -123,8 +132,34 @@ verify_all() {
     _verify_http_health
   fi
 
+  _verify_isolation
   _verify_highlights
   update_state "verification_complete" "true"
+}
+
+# _verify_terminal_node MAJOR — `bench start` runs in the user's terminal, not
+# in the installer. The bench's ./start picks the environment's own Node
+# from .nvmrc (no machine-wide default involved); check it really does, and
+# remind to use it when this terminal's plain `node` is a different version.
+VERIFY_NOTES=()
+_verify_terminal_node() {
+  local required="$1" via_start current
+  via_start="$(env -i HOME="${HOME}" USER="${USER:-$(id -un)}" TERM=dumb \
+      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      bash -c 'cd "$1" && export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" \
+               && nvm use --silent "$(cat .nvmrc)" >/dev/null && node --version' _ "${BENCH_DIR}" \
+      2>/dev/null < /dev/null | tail -n 1 || true)"
+  if [[ "${via_start}" == v${required}.* ]]; then
+    _vpass "./start uses this environment's Node.js ${via_start}"
+  else
+    _vfail "./start cannot find Node.js ${required} (found: ${via_start:-none}) — run: nvm install ${required}"
+  fi
+
+  current="$(PATH="${INSTALLER_ORIGINAL_PATH:-${PATH}}" command -v node >/dev/null 2>&1 \
+      && PATH="${INSTALLER_ORIGINAL_PATH:-${PATH}}" node --version 2>/dev/null || true)"
+  if [[ "${current}" != v${required}.* ]]; then
+    VERIFY_NOTES+=("Start Frappe with ./start — it uses Node.js ${required} for this environment. A plain 'bench start' in this terminal would use Node.js ${current:-(none)} and fail.")
+  fi
 }
 
 # _vfailed LABEL — true if the check named LABEL failed.
@@ -156,6 +191,7 @@ _verify_highlights() {
   if [[ "${security_ok}" -eq 1 ]]; then
     h+=("Security: database local-only, credentials private")
   fi
+  if [[ -n "${ISOLATION_PROOF:-}" ]]; then h+=("${ISOLATION_PROOF}"); fi
   VERIFY_HIGHLIGHTS=("${h[@]}")
 }
 
@@ -164,10 +200,14 @@ _verify_highlights() {
 _verify_security() {
   # Database and Redis must only listen on loopback; anything else lets other
   # machines on the network try to log in.
-  local -a ports=(6379 11000 13000)
+  local -a ports=(6379 "${REDIS_CACHE_PORT}" "${REDIS_QUEUE_PORT}")
   # In production gunicorn must sit behind nginx, never be reachable directly.
-  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then ports+=(8000); fi
-  mariadb_is_external || ports=(3306 "${ports[@]}")
+  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then ports+=("${WEB_PORT}"); fi
+  if [[ "${DB_MODE}" == "instance" ]]; then
+    ports=("${DB_INSTANCE_PORT}" "${ports[@]}")
+  elif ! mariadb_is_external; then
+    ports=(3306 "${ports[@]}")
+  fi
   local port exposed=""
   for port in "${ports[@]}"; do
     if ss -tlnH 2>/dev/null | awk -v p=":${port}" '
@@ -214,10 +254,10 @@ _verify_security() {
 _verify_http_health() {
   local http_ok=0
 
-  # Never kill someone else's server: if 8000 is taken, the probe would only
+  # Never kill someone else's server: if the port is taken, the probe would only
   # be talking to that process anyway.
-  if port_in_use 8000; then
-    _vwarn "HTTP check skipped: port 8000 is used by another process"
+  if port_in_use "${WEB_PORT}"; then
+    _vwarn "HTTP check skipped: port ${WEB_PORT} is used by another process"
     ui_line "  ${C_DIM}Free the port, then: cd \"${BENCH_DIR}\" && bench start${C_RESET}"
     return 0
   fi
@@ -232,7 +272,7 @@ _verify_http_health() {
 
   # Fallback Method: direct bench serve probe if bench start didn't respond
   if [[ "${http_ok}" -ne 1 ]]; then
-    _start_probe_server bench --site "${SITE_NAME}" serve --port 8000
+    _start_probe_server bench --site "${SITE_NAME}" serve --port "${WEB_PORT}"
     _wait_for_http 10 && http_ok=1
     _stop_probe_server
   fi
@@ -278,7 +318,7 @@ _wait_for_http() {
   sleep 1
   while [[ ${i} -lt ${tries} ]]; do
     HTTP_PROBE_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
-      -H "Host: ${SITE_NAME}" "http://127.0.0.1:8000" 2>/dev/null || echo '000')"
+      -H "Host: ${SITE_NAME}" "http://127.0.0.1:${WEB_PORT}" 2>/dev/null || echo '000')"
     [[ "${HTTP_PROBE_CODE}" =~ ^(200|301|302|303)$ ]] && return 0
     sleep 1
     i=$((i + 1))
@@ -307,8 +347,8 @@ print_final_output() {
   local frappe_version
   frappe_version="$(cd "${BENCH_DIR}" && ./env/bin/python -c "import frappe; print(frappe.__version__)" 2>/dev/null || echo "${SELECTED_FRAPPE_VERSION}.x")"
 
-  local url="http://${SITE_NAME}:8000" start
-  start="cd $(ui_short_path "${BENCH_DIR}") && bench start"
+  local url="http://${SITE_NAME}:${WEB_PORT}" start
+  start="cd $(ui_short_path "${BENCH_DIR}") && ./start"
   if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then
     url="http://${SITE_NAME}"
     [[ "${PROD_HTTPS}" -eq 1 ]] && url="https://${SITE_NAME}"

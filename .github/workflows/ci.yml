@@ -54,6 +54,13 @@ jobs:
             version: "16"
             env: prod
             args: --domain erp.example.test --no-firewall
+          - name: ubuntu-24.04 / two environments side by side (isolation)
+            image: ubuntu:24.04
+            version: "16"
+            env: local
+            # Second install next to the first: own ports, own DB instance;
+            # its verification fails if the first environment changed at all.
+            then: --version 16 --path /home/frappe/frappe16b --site b.local
           - name: ubuntu-24.04 / frappe-16 / via npm create
             image: ubuntu:24.04
             version: "16"

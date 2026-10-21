@@ -95,7 +95,7 @@ production_setup() {
     bench setup nginx --yes --logging combined --log_format combined
 
   _production_permissions "${user}"
-  _production_node_link
+  _production_supervisor_node
 
   "${SUDO[@]}" ln -sfn "${BENCH_DIR}/config/supervisor.conf" "/etc/supervisor/conf.d/${bench_name}.conf"
   "${SUDO[@]}" ln -sfn "${BENCH_DIR}/config/nginx.conf" "/etc/nginx/conf.d/${bench_name}.conf"
@@ -166,22 +166,27 @@ _production_permissions() {
   log_only "production permissions: www-data in group ${group}; secrets owner-only"
 }
 
-# _production_node_link — supervisor starts `bench socketio` with the system
-# PATH, where nvm's Node is invisible. Link it into /usr/local/bin, unless a
-# different Node is already installed there (that one is left alone).
-_production_node_link() {
-  local node_bin link="/usr/local/bin/node" required="${FRAPPE_CONFIG[node]}"
-  node_bin="$(command -v node)"
-  if [[ -e "${link}" && ! -L "${link}" ]]; then
-    if "${link}" --version 2>/dev/null | grep -q "^v${required}\."; then
-      ui_skip "System Node.js ${required} at ${link}"
-    else
-      ui_warn "${link} is a different Node.js ($("${link}" --version 2>/dev/null)); socketio needs ${required}."
-    fi
-    return 0
-  fi
-  "${SUDO[@]}" ln -sfn "${node_bin}" "${link}"
-  log_only "linked ${link} -> ${node_bin} (for supervisor's socketio)"
+# _production_supervisor_node — supervisor starts `bench socketio` with the
+# system PATH, where nvm's Node is invisible. Give every program of THIS
+# environment its own PATH (its Node version first) in its own config, so
+# environments needing different Node versions coexist and nothing
+# machine-wide (like /usr/local/bin/node) is changed. Re-applied whenever
+# the installer regenerates the config.
+_production_supervisor_node() {
+  local conf="${BENCH_DIR}/config/supervisor.conf" node_dir path_line
+  node_dir="$(dirname "$(command -v node)")"
+  path_line="environment=PATH=\"${node_dir}:${HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\""
+  [[ -f "${conf}" ]] || return 0
+  python3 - "${conf}" "${path_line}" <<'PYEOF'
+import re, sys
+path, line = sys.argv[1], sys.argv[2]
+text = open(path).read()
+# drop any PATH line we added before, then add one after each [program:...]
+text = re.sub(r"^environment=PATH=.*\n", "", text, flags=re.M)
+text = re.sub(r"^(\[program:[^\]]+\]\n)", lambda m: m.group(1) + line + "\n", text, flags=re.M)
+open(path, "w").write(text)
+PYEOF
+  log_only "supervisor programs of ${ENV_ID} use Node from ${node_dir}"
 }
 
 _production_service_enable() {

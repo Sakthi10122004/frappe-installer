@@ -23,6 +23,10 @@
 
 set -Eeuo pipefail
 
+# The terminal's own PATH, before the installer adds nvm/uv to it — used to
+# tell whether *this* terminal will find the right Node.js afterwards.
+INSTALLER_ORIGINAL_PATH="${PATH}"
+
 # ---- Determine script directory (handles spaces in paths) -------------------
 # Installed with npm, this file is run through a symlink in node_modules/.bin;
 # resolve it so lib/ is found next to the real file.
@@ -40,6 +44,8 @@ source "${SCRIPT_DIR}/lib/dependencies.sh"
 source "${SCRIPT_DIR}/lib/python.sh"
 source "${SCRIPT_DIR}/lib/node.sh"
 source "${SCRIPT_DIR}/lib/mariadb.sh"
+source "${SCRIPT_DIR}/lib/db_instance.sh"
+source "${SCRIPT_DIR}/lib/isolation.sh"
 source "${SCRIPT_DIR}/lib/redis.sh"
 source "${SCRIPT_DIR}/lib/wkhtmltopdf.sh"
 source "${SCRIPT_DIR}/lib/bench.sh"
@@ -247,8 +253,10 @@ main_install() {
   if [[ "${ENVIRONMENT_TYPE}" == "prod" ]]; then TOTAL_STAGES=11; fi
   select_frappe_version
   choose_alongside_path
+  env_plan                       # this environment: id, own ports, own database
   check_os_compatibility "${SELECTED_FRAPPE_VERSION}"
   check_disk_space "${INSTALL_PATH}"
+  isolation_snapshot             # fingerprint of everything that must stay untouched
 
   # Initialize state tracking now that BENCH_DIR is known
   state_init
@@ -270,9 +278,13 @@ main_install() {
   # ---- Stage 5: MariaDB ----------------------------------------------------
   ui_stage "MariaDB"
   install_mariadb
-  configure_mariadb
   load_existing_credentials
-  detect_mariadb_admin_auth
+  if [[ "${DB_MODE}" == "instance" ]]; then
+    db_instance_setup            # private instance; the system server is not touched
+  else
+    configure_mariadb            # shared server (benches made before environments)
+    detect_mariadb_admin_auth
+  fi
 
   # ---- Stage 6: Redis ------------------------------------------------------
   ui_stage "Redis"
@@ -291,6 +303,8 @@ main_install() {
   ui_stage "Bench preparation"
   install_bench_cli
   init_bench
+  env_apply_ports
+  env_write_start_script
   case "${INSTALL_MODE}" in
     update)  update_bench ;;
     upgrade) upgrade_bench ;;

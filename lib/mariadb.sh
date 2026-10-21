@@ -72,6 +72,13 @@ install_mariadb() {
     FRESH_MARIADB_INSTALL=1
   fi
 
+  # A private-instance environment only needs the binaries: the system
+  # server (and its config, AppArmor state and data) is left as it is.
+  if [[ "${DB_MODE}" == "instance" ]]; then
+    ui_ok "MariaDB binaries ready (this environment runs its own instance)"
+    return 0
+  fi
+
   # On Ubuntu 26.04+ the package's AppArmor profile can block mariadb-install-db
   # during post-install, leaving MariaDB installed but with no system tables.
   # Only a server we just installed is touched; an existing server that fails

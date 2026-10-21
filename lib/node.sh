@@ -128,7 +128,12 @@ install_node() {
   fi
 
   # Set as default and activate
-  bash -c "export NVM_DIR='${NVM_DIR_PATH}'; source '${NVM_DIR_PATH}/nvm.sh'; nvm alias default ${required_node} >/dev/null; nvm use ${required_node} >/dev/null" >> "${LOG_FILE}" 2>&1
+  # nvm's default is machine-wide (every terminal): set it only when there is
+  # none, so installing this environment never switches another one's Node.
+  # Each bench's ./start selects its own version from .nvmrc.
+  if [[ ! -s "${NVM_DIR_PATH}/alias/default" ]]; then
+    bash -c "export NVM_DIR='${NVM_DIR_PATH}'; source '${NVM_DIR_PATH}/nvm.sh'; nvm alias default ${required_node} >/dev/null" >> "${LOG_FILE}" 2>&1
+  fi
   nvm use "${required_node}" >/dev/null 2>&1 || true
 
   local node_v

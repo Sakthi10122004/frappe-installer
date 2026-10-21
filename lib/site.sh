@@ -262,9 +262,11 @@ create_site() {
   local -a db_args=(--mariadb-root-username "${MARIADB_ADMIN_USER}")
   if [[ -n "${DB_HOST}" ]]; then
     db_args+=(--db-host "${DB_HOST}" --db-port "${DB_PORT:-3306}")
-    # The site's DB user must be allowed to log in from this machine, not
-    # only from the DB server itself. Older benches lack this option.
-    if bench new-site --help 2>/dev/null | grep -q -- '--mariadb-user-host-login-scope'; then
+    # External server only: the site's DB user must be allowed to log in
+    # from this machine, not just from the server. (A private instance is on
+    # 127.0.0.1, where Frappe's default 'localhost' scope already matches.)
+    if mariadb_is_external && \
+       bench new-site --help 2>/dev/null | grep -q -- '--mariadb-user-host-login-scope'; then
       db_args+=(--mariadb-user-host-login-scope '%')
     fi
   fi
@@ -341,15 +343,16 @@ run_migrations() {
   update_state "migration_complete" "true"
 }
 
+# ensure_free_socketio_port — if this bench's own socketio port is taken by
+# something else, move it to a free one (never touching another bench).
 ensure_free_socketio_port() {
-  local port=9000
-  if ss -tlnp 2>/dev/null | grep -q ":${port} " || netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
-    port=9005
-    while ss -tlnp 2>/dev/null | grep -q ":${port} " || netstat -tlnp 2>/dev/null | grep -q ":${port} "; do
-      port=$((port + 1))
-    done
-    ui_info "Port 9000 is in use; auto-configuring socketio_port=${port}"
-    bench set-config -g socketio_port "${port}" >/dev/null 2>&1 || true
+  local port="${SOCKETIO_PORT:-9000}"
+  if port_in_use "${port}"; then
+    local next=$((port + 100))
+    while port_in_use "${next}"; do next=$((next + 1)); done
+    ui_info "Port ${port} is in use; this environment's socketio moves to ${next}"
+    bench set-config -g socketio_port "${next}" >/dev/null 2>&1 || true
+    SOCKETIO_PORT="${next}"
   fi
 }
 
@@ -447,11 +450,7 @@ show_installation_summary() {
   ui_summary_field "Bench" "${BENCH_DIR}"
   ui_summary_field "Site" "${SITE_NAME}"
   ui_summary_field "Administrator" "Administrator"
-  if mariadb_is_external; then
-    ui_summary_field "Database" "MariaDB (external, ${MARIADB_EXTERNAL_CNF})"
-  else
-    ui_summary_field "Database" "MariaDB (local)"
-  fi
+  isolation_summary_fields
   ui_blank
 
   if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
