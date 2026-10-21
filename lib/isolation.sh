@@ -279,18 +279,35 @@ PYEOF
 ISOLATION_BEFORE=""
 ISOLATION_PROOF=""
 
+# _hash_files FILE... — short hash of the readable files among FILE...
+# (names included, so a file appearing or vanishing changes it too). Missing
+# or root-only files are skipped the same way every time; never fails.
+_hash_files() {
+  local f
+  {
+    for f in "$@"; do
+      if [[ -f "${f}" && -r "${f}" ]]; then
+        printf '%s\n' "${f}"
+        cat -- "${f}"
+      fi
+    done
+  } | sha256sum | cut -c1-16 || true
+}
+
 _isolation_fingerprint() {
   local b
   for b in "${DISCOVERED_BENCHES[@]}"; do
-    [[ "${b}" == "${BENCH_DIR}" ]] && continue
-    printf '%s\t%s\n' "${b}" "$(cd "${b}" 2>/dev/null && \
-      cat sites/common_site_config.json sites/*/site_config.json Procfile apps.txt config/*.conf 2>/dev/null \
-      | sha256sum | cut -c1-16)"
+    if [[ "${b}" == "${BENCH_DIR}" || ! -d "${b}" ]]; then continue; fi
+    local -a files=("${b}/sites/common_site_config.json" "${b}/Procfile" "${b}/apps.txt")
+    files+=("${b}"/sites/*/site_config.json "${b}"/config/*.conf)
+    printf '%s\t%s\n' "${b}" "$(_hash_files "${files[@]}")"
   done
   # The shared server's config — only if that server existed before (a first
   # install of the mariadb-server package legitimately adds files there).
   if [[ "${DB_MODE}" != "shared" && "${ISOLATION_SERVER_EXISTED:-0}" -eq 1 && -d /etc/mysql ]]; then
-    printf '%s\t%s\n' "/etc/mysql" "$(find /etc/mysql -type f -exec cat {} + 2>/dev/null | sha256sum | cut -c1-16)"
+    local -a conf=()
+    mapfile -t conf < <(find /etc/mysql -type f 2>/dev/null | sort || true)
+    printf '%s\t%s\n' "/etc/mysql" "$(_hash_files "${conf[@]}")"
   fi
 }
 

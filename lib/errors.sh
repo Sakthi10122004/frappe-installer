@@ -8,6 +8,9 @@
 
 on_error() {
   local exit_code=$? line_no=$1 cmd=$2
+  # Inside a $(…) or ( … ) subshell, output would be captured, not shown:
+  # just end the subshell — the main installer reports the failure once.
+  if [[ "${BASH_SUBSHELL}" -gt 0 ]]; then exit "${exit_code}"; fi
   trap - ERR
   # Nothing below may abort the report itself (e.g. a grep with no match).
   set +e

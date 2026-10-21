@@ -67,6 +67,28 @@ echo '{"db_name": "_changed"}' > "${other}/sites/a.local/site_config.json"
 _verify_isolation >/dev/null
 assert_eq "a change to another bench is caught" "1" "${#VERIFY_FAILED_LIST[@]}"
 
+echo "== fingerprint under strict mode (as in a real run) =="
+cat > "${TMP}/strict.sh" <<'EOF'
+set -Eeuo pipefail
+cd "$1"; export HOME="$2"
+source lib/constants.sh
+for f in ui logging errors os state isolation verification; do source "lib/${f}.sh"; done
+LOG_FILE=/dev/null
+install_traps
+b="${HOME}/partial/frappe-bench"; mkdir -p "${b}/sites"   # no Procfile, apps.txt, configs
+echo '{}' > "${b}/sites/common_site_config.json"
+secret="${HOME}/rootonly.cnf"; echo "x" > "${secret}"; chmod 000 "${secret}"
+DISCOVERED_BENCHES=("${b}"); BENCH_DIR="${HOME}/new/frappe-bench"; DB_MODE=instance
+first="$(_isolation_fingerprint)"; second="$(_isolation_fingerprint)"
+[[ "${first}" == "${second}" ]] || { echo "UNSTABLE"; exit 1; }
+[[ "$(_hash_files "${secret}" /nonexistent)" =~ ^[0-9a-f]{16}$ ]] || { echo "BADHASH"; exit 1; }
+echo '{"changed": 1}' > "${b}/sites/common_site_config.json"
+[[ "$(_isolation_fingerprint)" != "${first}" ]] || { echo "MISSED CHANGE"; exit 1; }
+echo "STRICT-OK"
+EOF
+strict_out="$(bash "${TMP}/strict.sh" "$(pwd)" "${TMP}/strict_home" 2>&1)"
+assert_eq "no crash with missing/unreadable files; stable; still detects change" "STRICT-OK" "$(tail -n1 <<< "${strict_out}")"
+
 echo "== production: per-environment Node for supervisor =="
 BENCH_DIR="${TMP}/prod-bench"; mkdir -p "${BENCH_DIR}/config"
 printf '[program:p-web]\ncommand=x\n\n[program:p-socketio]\ncommand=bench socketio\n\n[group:p]\nprograms=p-web\n' \
