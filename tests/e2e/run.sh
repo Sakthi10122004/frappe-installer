@@ -18,6 +18,9 @@
 # Exit code is the installer's exit code (0 = installed and verified).
 set -uo pipefail
 
+# Everything runs inside main(): bash parses a function completely before
+# running it, so editing this file while a test runs can't corrupt that run.
+main() {
 base="${1:-ubuntu:24.04}"
 version="${2:-16}"
 env_type="${3:-local}"
@@ -74,3 +77,6 @@ if [[ "${rc}" -ne 0 ]]; then
   docker exec -u frappe "${name}" bash -c 'tail -n 60 "$(ls -t ~/.frappe-installer/logs/*.log | head -n1)"'
 fi
 exit "${rc}"
+}
+
+main "$@"

@@ -88,8 +88,11 @@ production_setup() {
   # Bench's own configs, generated for this user and bench.
   run_step "Generating supervisor config" "bench setup supervisor" \
     bench setup supervisor --user "${user}" --yes --skip-supervisord
+  # --log_format combined: bench defaults to "main", which only exists when
+  # bench replaces the whole /etc/nginx/nginx.conf (we never do); "combined"
+  # is built into nginx.
   run_step "Generating nginx config" "bench setup nginx" \
-    bench setup nginx --yes
+    bench setup nginx --yes --logging combined --log_format combined
 
   _production_permissions "${user}"
   _production_node_link
@@ -273,7 +276,7 @@ setup_https() {
   bench set-ssl-certificate "${SITE_NAME}" "${live}/fullchain.pem" >> "${LOG_FILE}" 2>&1
   bench set-ssl-key "${SITE_NAME}" "${live}/privkey.pem" >> "${LOG_FILE}" 2>&1
   run_step "Enabling HTTPS in nginx" "bench setup nginx (ssl)" \
-    bench setup nginx --yes
+    bench setup nginx --yes --logging combined --log_format combined
   "${SUDO[@]}" nginx -t >> "${LOG_FILE}" 2>&1 && "${SUDO[@]}" systemctl reload nginx
   PROD_HTTPS=1
   ui_ok "HTTPS enabled for ${SITE_NAME} (renews automatically)"
