@@ -84,6 +84,12 @@ assert_eq "package.json version = INSTALLER_VERSION" "${INSTALLER_VERSION}" \
   "$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
 assert_eq "npm bin points at the installer" "install-frappe.sh" \
   "$(python3 -c 'import json; print(json.load(open("package.json"))["bin"]["create-frappe"])')"
+# `npm i create-frappe` run inside this folder once added the package as a
+# dependency of itself (published that way) and committed node_modules/.
+assert_eq "package.json has no dependencies (the installer is pure bash)" "{}" \
+  "$(python3 -c 'import json; print(json.load(open("package.json")).get("dependencies") or {})')"
+assert_eq "node_modules is not tracked by git" "0" \
+  "$(git ls-files node_modules package-lock.json 2>/dev/null | grep -c . || true)"
 
 echo ""
 echo "============================================================"

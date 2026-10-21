@@ -21,3 +21,8 @@ frappe16/
 *~
 .vscode/
 .idea/
+
+# npm (installing the package inside this folder)
+node_modules/
+package-lock.json
+*.tgz
