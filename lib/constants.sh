@@ -7,7 +7,7 @@
 
 # ---- Script metadata -------------------------------------------------------
 INSTALLER_NAME="install-frappe.sh"
-INSTALLER_VERSION="0.0.6"
+INSTALLER_VERSION="0.0.7"
 INSTALLER_CODENAME="frappe-installer"
 
 # How the user should run the installer again, as they started it:
