@@ -16,7 +16,7 @@
     "type": "git",
     "url": "git+https://github.com/Sakthi10122004/frappe-installer.git"
   },
-  "license": "MIT",
+  "license": "UNLICENSED",
   "author": "sakthi10122004",
   "bin": {
     "create-frappe": "install-frappe.sh",
