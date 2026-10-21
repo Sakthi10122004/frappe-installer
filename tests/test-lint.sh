@@ -26,6 +26,11 @@ for path in sorted(glob.glob("lib/*.sh")) + ["install-frappe.sh"]:
                 and "|| true" not in s and "|| echo" not in s):
             print(f"{path}:{start + 1}: {s[:110]}")
         i += 1
+    # `x=$?` right after `fi`: $? is then the if's status (0 when the
+    # condition was false) — this once made failed steps report success.
+    for n in range(1, len(lines)):
+        if re.match(r"^\s*(local\s+)?\w+=\$\?\s*$", lines[n]) and lines[n - 1].strip() == "fi":
+            print(f"{path}:{n + 1}: exit code read after 'fi' (always 0) — read it in an else branch")
 PYEOF
 )"
 

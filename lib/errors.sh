@@ -103,6 +103,9 @@ failure_hints() {
   if _has "access denied for user"; then
     _hint "MariaDB rejected the login. Run: ${INSTALLER_RERUN} --doctor --component mariadb (it checks the saved admin account)."
   fi
+  if _has "installation of system tables failed"; then
+    _hint "MariaDB could not create its files — usually AppArmor. See the denials with: sudo journalctl -k | grep DENIED | grep mariadbd"
+  fi
   if _has "frappe-db@[a-z0-9-]+"; then
     _hint "This environment's own database did not start. See why with: sudo journalctl -u frappe-db@${ENV_ID:-<id>} -n 50  (and /var/log/frappe-mariadb/)"
   fi

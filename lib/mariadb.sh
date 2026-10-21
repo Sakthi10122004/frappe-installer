@@ -533,19 +533,9 @@ default-character-set = utf8mb4
 EOF
 )
 
-  # Local setups: flush the InnoDB log to disk about once a second instead of
-  # on every commit. Site creation makes thousands of small commits, so this
-  # makes it several times faster. Trade-off: if the whole machine crashes or
-  # loses power, up to ~1s of recent writes can be lost (a MariaDB restart or
-  # crash alone loses nothing). Production keeps full per-commit durability.
-  if [[ "${ENVIRONMENT_TYPE:-local}" == "local" ]]; then
-    desired+=$'\n\n'"$(cat <<'EOF'
-# Local development speed-up (set because --env local was chosen)
-[mysqld]
-innodb_flush_log_at_trx_commit = 2
-EOF
-)"
-  fi
+  # No "faster writes" setting here: this server is shared, and changing its
+  # durability would affect every database on it. Private environment
+  # instances get it instead (lib/db_instance.sh).
 
   if [[ -f "${conf_file}" ]] && grep -qF "${marker}" "${conf_file}" && \
      diff -q <(echo "${desired}") "${conf_file}" >/dev/null 2>&1; then

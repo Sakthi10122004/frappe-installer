@@ -94,6 +94,9 @@ verify_all() {
     else
       verify_check "MariaDB running" svc_is_active mariadb
     fi
+    if [[ -n "${DB_FALLBACK_REASON:-}" ]]; then
+      _vwarn "Isolation reduced: using the shared MariaDB server (private database failed: ${DB_FALLBACK_REASON:0:70})"
+    fi
   fi
   verify_check "Redis responds to PING" \
     bash -c "[[ \"\$(redis-cli ping)\" == 'PONG' ]]"
@@ -192,6 +195,9 @@ _verify_highlights() {
     h+=("Security: database local-only, credentials private")
   fi
   if [[ -n "${ISOLATION_PROOF:-}" ]]; then h+=("${ISOLATION_PROOF}"); fi
+  if [[ "${#HEALED_STEPS[@]}" -gt 0 ]]; then
+    h+=("Self-healed ${#HEALED_STEPS[@]} problem(s) along the way (details in the log)")
+  fi
   VERIFY_HIGHLIGHTS=("${h[@]}")
 }
 

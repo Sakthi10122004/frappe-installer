@@ -38,5 +38,8 @@
   "scripts": {
     "version": "sed -i \"s/^INSTALLER_VERSION=\\\".*\\\"$/INSTALLER_VERSION=\\\"$npm_package_version\\\"/\" lib/constants.sh && git add lib/constants.sh",
     "prepublishOnly": "for t in tests/test-*.sh; do bash \"$t\" >/dev/null || { echo \"FAILED: $t\"; exit 1; }; done"
+  },
+  "dependencies": {
+    "create-frappe": "^0.0.6"
   }
 }

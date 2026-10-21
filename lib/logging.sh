@@ -92,15 +92,31 @@ run_logged() {
 
 run_step() {
   local human="$1" desc="$2"; shift 2
-  spinner_start "${human}"
-  if run_logged "${desc}" "$@"; then
-    spinner_stop ok "${human}"
-    return 0
-  else
-    local rc=$?
+  local attempt=1 rc started
+  while true; do
+    spinner_start "${human}"
+    started="${SPINNER_STARTED_AT}"
+    # rc must be read in the else branch: after `if …; fi` with a false
+    # condition, $? is 0, which would report every failure as a success.
+    if run_logged "${desc}" "$@"; then
+      SPINNER_STARTED_AT="${started}"
+      spinner_stop ok "${human}"
+      if [[ "${attempt}" -gt 1 ]]; then LAST_FAILED_STEP=""; LAST_FAILED_CMD=""; fi
+      return 0
+    else
+      rc=$?
+    fi
+    spinner_stop fail ""
+    # Self-healing (lib/heal.sh): a recognised, fixable cause → fix, retry.
+    if [[ "${attempt}" -le "${HEAL_MAX:-0}" ]] && declare -F heal_step >/dev/null \
+       && heal_step "${desc}" "${attempt}"; then
+      attempt=$((attempt + 1))
+      continue
+    fi
+    SPINNER_STARTED_AT="${started}"
     spinner_stop fail "${human} — failed"
     return "${rc}"
-  fi
+  done
 }
 
 # ---- retry_with_backoff DESC MAX CMD... -------------------------------------

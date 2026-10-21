@@ -20,6 +20,8 @@
 # Needs Docker with permission to run privileged containers (systemd as PID 1).
 # The container is removed afterwards; set KEEP=1 to keep it for debugging.
 # Exit code is the installer's exit code (0 = installed and verified).
+# Runs use --no-fallback: a broken private-database path must fail the test,
+# not be hidden by the fallback to the shared server.
 set -uo pipefail
 
 # Everything runs inside main(): bash parses a function completely before
@@ -88,7 +90,7 @@ fi
 echo "==> Installing Frappe ${version} (${env_type}) via ${launch[*]} — $*"
 start=$(date +%s)
 docker exec -u frappe -w /home/frappe -e TERM=dumb "${name}" \
-  "${launch[@]}" --non-interactive --env "${env_type}" --version "${version}" "$@"
+  "${launch[@]}" --non-interactive --no-fallback --env "${env_type}" --version "${version}" "$@"
 rc=$?
 echo "==> Installer exit code: ${rc} after $(( $(date +%s) - start ))s"
 
@@ -98,7 +100,7 @@ if [[ "${rc}" -eq 0 && -n "${THEN:-}" ]]; then
   start=$(date +%s)
   # shellcheck disable=SC2086  # THEN is a list of arguments
   docker exec -u frappe -w /home/frappe -e TERM=dumb "${name}" \
-    "${launch[@]}" --non-interactive --env "${env_type}" ${THEN}
+    "${launch[@]}" --non-interactive --no-fallback --env "${env_type}" ${THEN}
   rc=$?
   echo "==> Second run exit code: ${rc} after $(( $(date +%s) - start ))s"
 fi

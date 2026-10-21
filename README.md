@@ -135,6 +135,29 @@ sudo rm -f /etc/nginx/conf.d/"$(basename "${bench}")".conf /etc/supervisor/conf.
 sudo supervisorctl update && sudo systemctl reload nginx
 ```
 
+## Self-Healing and Fallbacks
+
+When a step fails, the installer reads its output. If it recognises the cause, it fixes
+it and retries the step (at most twice), showing `↻ Self-healing: …`:
+
+| Recognised problem | What it does |
+|---|---|
+| Network glitch (DNS, timeout, reset, 5xx) | waits (10s, then 20s) and retries |
+| apt lock held (e.g. automatic updates) | waits for it and retries |
+| Interrupted package install | runs `dpkg --configure -a`, retries |
+| Stale package lists | runs `apt-get update`, retries |
+| Half-made bench after a failed `bench init` | moves it aside (never deletes), retries |
+| Wrong Node.js active | switches to the environment's Node, retries |
+
+Steps that aren't safe to repeat (creating a site, `bench update`, certificate requests)
+are never retried, and nothing unrecognised is retried blindly — those stop with a
+failure screen that says where, why and how to fix it.
+
+**Database fallback:** if an environment's private MariaDB instance can't be created
+even after healing, the installer falls back to the system's shared MariaDB server (the
+environment still gets its own databases; other databases there are not touched) and
+reports *"Isolation reduced"* as a warning. Use `--no-fallback` to fail instead.
+
 ## Production Deployment
 
 Run as a regular user with sudo (not root), on a server whose DNS points at it:

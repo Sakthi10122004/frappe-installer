@@ -197,6 +197,7 @@ PROD_DOMAIN=""                # --domain
 PROD_LETSENCRYPT_EMAIL=""     # --letsencrypt-email (enables HTTPS)
 PROD_FIREWALL=1               # --no-firewall sets 0
 PROD_HTTPS=0
+DB_FALLBACK=1                 # --no-fallback sets 0 (see db_fallback_to_shared)
 DISCOVERED_BENCHES=()
 
 # ---- sudo command array (replaced with empty array when running as root) ----

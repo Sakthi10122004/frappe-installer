@@ -37,16 +37,23 @@ nvm_load() {
 # `nvm install`, which checks nodejs.org's SHA-256 sums.
 
 _install_nvm_verified() {
+  # Clone next to the target and move it into place only once verified, so
+  # an interrupted or failed download never leaves a half-made ~/.nvm (and
+  # a self-healing retry can simply start over).
+  local tmp="${NVM_DIR_PATH}.download-$$"
+  rm -rf -- "${tmp}"
   git -c advice.detachedHead=false clone --quiet --depth 1 --branch "${NVM_VERSION}" \
-    https://github.com/nvm-sh/nvm.git "${NVM_DIR_PATH}" || return 1
+    https://github.com/nvm-sh/nvm.git "${tmp}" || { rm -rf -- "${tmp}"; return 1; }
 
   local actual
-  actual="$(git -C "${NVM_DIR_PATH}" rev-parse HEAD)"
+  actual="$(git -C "${tmp}" rev-parse HEAD)"
   if [[ "${actual}" != "${NVM_COMMIT}" ]]; then
     echo "NVM ${NVM_VERSION} is commit ${actual}, expected ${NVM_COMMIT} — refusing it." >&2
-    rm -rf "${NVM_DIR_PATH}"
+    rm -rf -- "${tmp}"
     return 1
   fi
+  if [[ -d "${NVM_DIR_PATH}" ]]; then rmdir "${NVM_DIR_PATH}"; fi   # empty (checked by the caller)
+  mv "${tmp}" "${NVM_DIR_PATH}"
 
   # Make nvm (and so node/yarn for `bench start`) available in new shells,
   # as nvm's own installer would.

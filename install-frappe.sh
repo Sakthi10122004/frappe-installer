@@ -38,6 +38,7 @@ source "${SCRIPT_DIR}/lib/ui.sh"
 source "${SCRIPT_DIR}/lib/logging.sh"
 source "${SCRIPT_DIR}/lib/errors.sh"
 source "${SCRIPT_DIR}/lib/download.sh"
+source "${SCRIPT_DIR}/lib/heal.sh"
 source "${SCRIPT_DIR}/lib/os.sh"
 source "${SCRIPT_DIR}/lib/state.sh"
 source "${SCRIPT_DIR}/lib/dependencies.sh"
@@ -81,6 +82,8 @@ OPTIONS:
   --letsencrypt-email EMAIL
                        Production: get a Let's Encrypt HTTPS certificate
   --no-firewall        Production: don't enable ufw
+  --no-fallback        Fail instead of falling back to the shared MariaDB server
+                       when this environment's private database can't be created
   --action ACTION      Existing bench at --path: keep | update | upgrade
   --non-interactive    Never prompt. Fail instead of asking.
   --no-animation       Plain, static output (also: FRAPPE_INSTALLER_NO_ANIMATION=1;
@@ -148,6 +151,8 @@ parse_args() {
         PROD_LETSENCRYPT_EMAIL="${1#*=}"; shift ;;
       --no-firewall)
         PROD_FIREWALL=0; shift ;;
+      --no-fallback)
+        DB_FALLBACK=0; shift ;;
       --action)
         [[ $# -ge 2 ]] || { echo "Error: --action requires a value (keep, update or upgrade)" >&2; exit 2; }
         CLI_ACTION="$2"; shift 2 ;;
@@ -280,9 +285,15 @@ main_install() {
   install_mariadb
   load_existing_credentials
   if [[ "${DB_MODE}" == "instance" ]]; then
-    db_instance_setup            # private instance; the system server is not touched
-  else
-    configure_mariadb            # shared server (benches made before environments)
+    # Private instance; the system server is not touched. If it can't be
+    # created even after self-healing, fall back to the shared server.
+    if ! db_instance_setup; then
+      db_fallback_to_shared
+      install_mariadb            # now prepares the shared server instead
+    fi
+  fi
+  if [[ "${DB_MODE}" != "instance" ]]; then
+    configure_mariadb            # shared server (older benches, or the fallback)
     detect_mariadb_admin_auth
   fi
 
