@@ -16,7 +16,7 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -x -S warning -e SC1091,SC2034,SC2154,SC2164 \
-            install-frappe.sh lib/*.sh tools/*.sh tests/e2e/run.sh
+            install-frappe.sh lib/*.sh tools/*.sh tests/e2e/run.sh tests/e2e/annotate.sh
       - name: unit tests
         run: |
           rc=0

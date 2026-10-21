@@ -373,6 +373,13 @@ clear_npm_environment() {
   unset PREFIX
 }
 
+# Patient downloads: bench init fetches hundreds of packages, and one slow
+# response under the tools' short default timeouts fails the whole step.
+# Set for the installer's own process only — no user or system config changes.
+export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}"
+export PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-120}"
+export YARN_NETWORK_TIMEOUT="${YARN_NETWORK_TIMEOUT:-300000}"
+
 main() {
   clear_npm_environment
   parse_args "$@"
