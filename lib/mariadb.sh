@@ -148,7 +148,8 @@ print_mariadb_likely_cause() {
 
   local pattern cause
   for pattern in "${signatures[@]}"; do
-    cause="$(echo "${recent}" | grep -iE "${pattern}" | grep -v "journalctl" | tail -n 1 | awk '{$1=$1;print}')"
+    # `|| true`: no match is normal here, not an error (set -e/pipefail).
+    cause="$(echo "${recent}" | grep -iE "${pattern}" | grep -v "journalctl" | tail -n 1 | awk '{$1=$1;print}' || true)"
     if [[ -n "${cause}" ]]; then
       ui_line "  Likely cause: ${C_RED}${cause}${C_RESET}"
       if echo "${pattern}" | grep -q "privilege tables"; then
@@ -706,7 +707,7 @@ detect_mariadb_admin_auth() {
       return $?
       ;;
     3|*)
-      exit 0
+      user_cancel "You chose Exit when MariaDB admin access was needed."
       ;;
   esac
 }

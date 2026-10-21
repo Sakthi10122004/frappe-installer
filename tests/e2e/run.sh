@@ -13,6 +13,10 @@
 #   THEN="--action upgrade --version 16 --path /home/frappe/frappe15" \
 #     tests/e2e/run.sh ubuntu:24.04 15 local   # install, then run again with THEN
 #
+#   VIA_NPM=1 tests/e2e/run.sh ubuntu:24.04 16 local
+#     # as users run it: Node/npm preinstalled, started like `npm create frappe`
+#     # (npm exec on the packed tarball, with npm's environment variables)
+#
 # Needs Docker with permission to run privileged containers (systemd as PID 1).
 # The container is removed afterwards; set KEEP=1 to keep it for debugging.
 # Exit code is the installer's exit code (0 = installed and verified).
@@ -28,6 +32,19 @@ shift $(( $# < 3 ? $# : 3 ))
 [[ "${1:-}" == "--" ]] && shift
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# AppArmor profiles loaded on the *host* also confine processes in privileged
+# containers. A host running its own MariaDB (profile "mariadbd") blocks the
+# container's mariadbd with "Errcode: 13 Permission denied" — a test-host
+# artifact, not an installer bug. GitHub's runners don't have this profile.
+local p
+for p in /etc/apparmor.d/mariadbd /etc/apparmor.d/usr.sbin.mariadbd; do
+  if [[ -f "${p}" && ! -e "/etc/apparmor.d/disable/$(basename "${p}")" ]]; then
+    echo "WARNING: this host has an active MariaDB AppArmor profile (${p})."
+    echo "         The container's MariaDB will likely fail with 'Errcode: 13 Permission denied'."
+    echo "         Run this test in CI or on a host without MariaDB."
+  fi
+done
 tag="frappe-installer-e2e:${base//[:\/]/-}"
 name="frappe-e2e-${version}-${env_type}-$$"
 
@@ -54,10 +71,24 @@ for _ in $(seq 60); do
   sleep 1
 done
 
-echo "==> Installing Frappe ${version} (${env_type}) — $*"
+# How the installer is started: directly, or through npm like real users.
+local -a launch=(/installer/install-frappe.sh)
+if [[ "${VIA_NPM:-0}" == "1" ]]; then
+  echo "==> Packing the npm package and preinstalling Node.js + npm (distro packages)"
+  local pkgdir tarball
+  pkgdir="$(mktemp -d)"
+  tarball="$(cd "${root}" && npm pack --silent --pack-destination "${pkgdir}")" || exit 1
+  docker cp "${pkgdir}/${tarball}" "${name}:/opt/create-frappe.tgz" >/dev/null || exit 1
+  docker exec "${name}" chmod a+r /opt/create-frappe.tgz
+  docker exec -e DEBIAN_FRONTEND=noninteractive "${name}" bash -c \
+    'apt-get update -qq && apt-get install -y -qq nodejs npm >/dev/null' || exit 1
+  launch=(npm exec --yes --package=/opt/create-frappe.tgz -- create-frappe)
+fi
+
+echo "==> Installing Frappe ${version} (${env_type}) via ${launch[*]} — $*"
 start=$(date +%s)
 docker exec -u frappe -w /home/frappe -e TERM=dumb "${name}" \
-  /installer/install-frappe.sh --non-interactive --env "${env_type}" --version "${version}" "$@"
+  "${launch[@]}" --non-interactive --env "${env_type}" --version "${version}" "$@"
 rc=$?
 echo "==> Installer exit code: ${rc} after $(( $(date +%s) - start ))s"
 
@@ -67,7 +98,7 @@ if [[ "${rc}" -eq 0 && -n "${THEN:-}" ]]; then
   start=$(date +%s)
   # shellcheck disable=SC2086  # THEN is a list of arguments
   docker exec -u frappe -w /home/frappe -e TERM=dumb "${name}" \
-    /installer/install-frappe.sh --non-interactive --env "${env_type}" ${THEN}
+    "${launch[@]}" --non-interactive --env "${env_type}" ${THEN}
   rc=$?
   echo "==> Second run exit code: ${rc} after $(( $(date +%s) - start ))s"
 fi

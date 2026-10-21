@@ -18,6 +18,7 @@ source "${ROOT}/lib/constants.sh"
 source "${ROOT}/lib/ui.sh"
 source "${ROOT}/lib/logging.sh"
 source "${ROOT}/lib/errors.sh"
+source "${ROOT}/lib/verification.sh"
 
 for arg in "$@"; do
   case "${arg}" in
@@ -111,12 +112,16 @@ ui_ok "Credentials saved: ${HOME}/frappe${version}/frappe-bench/credentials/${si
 
 ui_stage "Verification"
 for check in "Python available via uv" "Node.js active" "MariaDB running" "Redis responds to PING" \
-             "Site database accessible" "Frontend assets built" "HTTP health check (site responded with 200)"; do
-  ui_ok "${check}"
+             "Site database accessible" "Administrator user provisioned" "Frontend assets built" \
+             "Database and Redis listen on localhost only" "Credential files are private (chmod 600)" \
+             "HTTP health check (site responded with 200)"; do
+  _vpass "${check}"
   _ui_sleep 0.08
 done
+HTTP_PROOF="Site answered HTTP 200 — it is up and serving pages"
+_verify_highlights
 
-ui_success_banner "${version}"
+ui_success_banner "${version}" "http://${site}:8000" "cd ~/frappe${version}/frappe-bench && bench start"
 ui_stage_timeline
 ui_blank
 ui_summary_field "URL" "http://${site}:8000"

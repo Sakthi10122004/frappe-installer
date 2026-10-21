@@ -182,6 +182,8 @@ CREDENTIALS_FILE=""
 VERIFY_FAILURES=0
 LAST_FAILED_STEP=""   # set by run_logged when a step fails (failure screen)
 LAST_FAILED_CMD=""
+LAST_FATAL_MSG=""     # set by fail_fatal (failure screen reason)
+FAILURE_REPORTED=0    # the failure screen was already shown
 
 # ---- Lifecycle (see lib/lifecycle.sh) -----------------------------------------
 # INSTALL_MODE: fresh | keep | update | upgrade | alongside

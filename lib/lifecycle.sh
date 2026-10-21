@@ -90,7 +90,7 @@ resume_wizard() {
   choice="$(ui_select "Continue where you left off?" 1 "${cards[@]}")"
 
   if [[ "${choice}" -eq "${#cards[@]}" ]]; then
-    exit 0
+    user_cancel "You chose Exit at the 'continue where you left off' prompt."
   fi
 
   if [[ "${choice}" -eq $(( ${#cards[@]} - 1 )) ]]; then
@@ -179,7 +179,9 @@ existing_environment_wizard() {
     cards+=("New install|A separate new bench|Existing ones untouched" "Exit")
     local pick
     pick="$(ui_select "Frappe is already installed. Which one?" 1 "${cards[@]}")"
-    if [[ "${pick}" -eq "${#cards[@]}" ]]; then exit 0; fi
+    if [[ "${pick}" -eq "${#cards[@]}" ]]; then
+      user_cancel "You chose Exit when picking which existing Frappe to work with."
+    fi
     if [[ "${pick}" -eq $(( ${#cards[@]} - 1 )) ]]; then
       INSTALL_MODE="alongside"
       return 0
@@ -239,8 +241,7 @@ existing_environment_wizard() {
       ui_line "  ${C_DIM}Instead, Frappe 15 will be installed as a separate bench. Your Frappe 16${C_RESET}"
       ui_line "  ${C_DIM}bench and its sites are not touched.${C_RESET}"
       if ! ui_confirm "Install Frappe 15 alongside?" 0; then
-        ui_line "No changes were made."
-        exit 0
+        user_cancel "You chose not to install Frappe 15 alongside (an in-place downgrade isn't possible)."
       fi
       INSTALL_MODE="alongside"
       SELECTED_FRAPPE_VERSION=15
@@ -249,7 +250,7 @@ existing_environment_wizard() {
       INSTALL_MODE="alongside"
       ;;
     *)
-      exit 0
+      user_cancel "You chose Exit at the 'Frappe found' prompt."
       ;;
   esac
 }

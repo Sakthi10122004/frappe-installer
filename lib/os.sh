@@ -102,8 +102,7 @@ check_os_compatibility() {
     ui_info "Proceeding with compatibility attempt."
     return 0
   else
-    ui_line "No changes were made."
-    exit 0
+    user_cancel "${OS_PRETTY} is outside Frappe ${frappe_version}'s supported list, and you chose not to try anyway."
   fi
 }
 
@@ -216,7 +215,7 @@ check_memory() {
     ui_warn "Low memory detected: ${total_mb} MB (recommended: ${MIN_MEMORY_MB} MB+)"
     ui_warn "Asset compilation may fail or be slow."
     if [[ "${NON_INTERACTIVE}" -eq 0 ]]; then
-      ui_confirm "Continue anyway?" || { ui_line "Exiting."; exit 0; }
+      ui_confirm "Continue anyway?" || user_cancel "You chose to stop because of low memory (${total_mb} MB; ${MIN_MEMORY_MB} MB+ recommended)."
     fi
     return 0
   fi
@@ -249,8 +248,7 @@ check_port() {
     local answer
     read -r -p "  ${C_CYAN}?${C_RESET} Select [1]: " answer
     if [[ "${answer}" == "2" ]]; then
-      ui_line "Exiting. Free port ${port} and re-run."
-      exit 0
+      user_cancel "You chose to stop because port ${port} is in use. Free it, then start again."
     fi
     return 0
   fi

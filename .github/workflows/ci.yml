@@ -54,6 +54,11 @@ jobs:
             version: "16"
             env: prod
             args: --domain erp.example.test --no-firewall
+          - name: ubuntu-24.04 / frappe-16 / via npm create
+            image: ubuntu:24.04
+            version: "16"
+            env: local
+            via_npm: "1"
           - name: ubuntu-24.04 / frappe-15 → 16 upgrade
             image: ubuntu:24.04
             version: "15"
@@ -64,4 +69,5 @@ jobs:
       - name: install
         env:
           THEN: ${{ matrix.then }}
+          VIA_NPM: ${{ matrix.via_npm }}
         run: tests/e2e/run.sh "${{ matrix.image }}" "${{ matrix.version }}" "${{ matrix.env }}" -- ${{ matrix.args }}

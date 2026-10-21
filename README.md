@@ -158,7 +158,3 @@ THEN="--action upgrade --version 16 --path /home/frappe/frappe15" tests/e2e/run.
 ```
 
 CI (`.github/workflows/ci.yml`) runs shellcheck and the unit tests on every push, then the end-to-end matrix: Frappe 15 on Ubuntu 22.04 and Debian 12, Frappe 16 local and production on Ubuntu 24.04, and a 15 → 16 upgrade.
-
-## License
-
-MIT License

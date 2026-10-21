@@ -168,6 +168,37 @@ _ui_typewriter() {
   done
 }
 
+# _ui_progress_line — "━━━━━━╸────── 40%  step 5 of 10" for the end screens.
+_ui_progress_line() {
+  local done_stages pct bar="" i width=22 filled
+  done_stages=$(( CURRENT_STAGE_NUM > 0 ? CURRENT_STAGE_NUM - 1 : 0 ))
+  pct=$(( done_stages * 100 / TOTAL_STAGES ))
+  filled=$(( done_stages * width / TOTAL_STAGES ))
+  for (( i = 0; i < width; i++ )); do
+    if [[ "${i}" -lt "${filled}" ]]; then
+      _ui_grad_at "${i}" "${width}"; bar+="${UI_GRAD}━"
+    elif [[ "${i}" -eq "${filled}" ]]; then
+      bar+="${C_YELLOW}${C_BOLD}╸${C_RESET}"
+    else
+      bar+="${C_DIM}─"
+    fi
+  done
+  printf '%s%s %s%d%%%s' "${bar}" "${C_RESET}" "${C_BOLD}" "${pct}" "${C_RESET}"
+}
+
+# _ui_wrap TEXT WIDTH — print TEXT wrapped at word boundaries, one line each.
+_ui_wrap() {
+  printf '%s\n' "$1" | fold -s -w "$2" | sed 's/[[:space:]]*$//'
+}
+
+# _ui_box_width — usable text width inside end-screen boxes.
+_ui_box_width() {
+  local w=$(( $(_ui_cols) - 16 ))
+  if [[ "${w}" -gt 72 ]]; then w=72; fi
+  if [[ "${w}" -lt 30 ]]; then w=30; fi
+  echo "${w}"
+}
+
 # ui_box COLOR LINE... — a rounded box around LINEs (which may carry colors).
 ui_box() {
   local color="$1"; shift
@@ -943,45 +974,56 @@ _ui_confetti() {
   tput cnorm 2>/dev/null || true
 }
 
+# ui_success_banner VERSION URL START_HINT — what was verified, and how to
+# use it. Reads VERIFY_PASSED / VERIFY_TOTAL / VERIFY_WARNING_LIST.
 ui_success_banner() {
-  local version="$1" now took
+  local version="$1" url="${2:-}" start="${3:-}" now took title color
   _ui_now now
   took="$(_ui_fmt_duration $(( now - UI_INSTALL_STARTED_AT )))"
+
+  local nwarn="${#VERIFY_WARNING_LIST[@]}"
+  if [[ "${nwarn}" -gt 0 ]]; then
+    color="${C_YELLOW}"
+    title="✔  FRAPPE ${version} IS READY ${C_RESET}${C_YELLOW}— with ${nwarn} warning(s)"
+  else
+    color="${C_GREEN}"
+    title="✔  FRAPPE ${version} IS READY"
+  fi
+
+  local -a lines=("" "${C_BOLD}${color}${title}${C_RESET}" "" "${C_BOLD}WHY IT'S READY${C_RESET}")
+  lines+=("  ${C_GREEN}✔${C_RESET} ${C_BOLD}${VERIFY_PASSED} of ${VERIFY_TOTAL}${C_RESET} health checks passed")
+  local proof
+  for proof in "${VERIFY_HIGHLIGHTS[@]}"; do
+    lines+=("  ${C_GREEN}✔${C_RESET} ${proof}")
+  done
+  if [[ "${nwarn}" -gt 0 ]]; then
+    lines+=("" "${C_BOLD}WORTH A LOOK${C_RESET}")
+    local wline
+    for wline in "${VERIFY_WARNING_LIST[@]}"; do
+      lines+=("  ${C_YELLOW}⚠${C_RESET} ${wline:0:$(( $(_ui_box_width) - 4 ))}")
+    done
+  fi
+  lines+=("" "${C_BOLD}START USING IT${C_RESET}")
+  [[ -n "${url}" ]] && lines+=("  ${C_DIM}Open   ${C_RESET} ${C_BOLD}${C_CYAN}${url}${C_RESET}")
+  lines+=("  ${C_DIM}Login  ${C_RESET} Administrator ${C_DIM}· password in the credentials file below${C_RESET}")
+  [[ -n "${start}" ]] && lines+=("  ${C_DIM}Run    ${C_RESET} ${start}")
+  lines+=("  ${C_DIM}Took   ${C_RESET} ${took}" "")
+
   ui_blank
   _ui_confetti
-  ui_box "${C_GREEN}" \
-    "" \
-    "${C_BOLD}${C_GREEN}✔  FRAPPE ${version} IS READY${C_RESET}" \
-    "" \
-    "${C_DIM}Installed and verified in ${took}${C_RESET}" \
-    ""
+  ui_box "${color}" "${lines[@]}"
 }
 
 # ---- Interrupted (Ctrl+C) -----------------------------------------------------
 
 ui_interrupt_banner() {
-  local now took done_stages pct bar="" i width=24 filled
+  local now took stage_line
   _ui_now now
   took="$(_ui_fmt_duration $(( now - UI_INSTALL_STARTED_AT )))"
-  done_stages=$(( CURRENT_STAGE_NUM > 0 ? CURRENT_STAGE_NUM - 1 : 0 ))
-  pct=$(( done_stages * 100 / TOTAL_STAGES ))
-  filled=$(( done_stages * width / TOTAL_STAGES ))
-  for (( i = 0; i < width; i++ )); do
-    if [[ "${i}" -lt "${filled}" ]]; then
-      _ui_grad_at "${i}" "${width}"; bar+="${UI_GRAD}━"
-    elif [[ "${i}" -eq "${filled}" ]]; then
-      bar+="${C_YELLOW}${C_BOLD}╸"
-    else
-      bar+="${C_DIM}─"
-    fi
-  done
-  bar+="${C_RESET}"
-
-  local stage_line
   if [[ "${CURRENT_STAGE_NUM}" -gt 0 ]]; then
-    stage_line="${C_DIM}Stopped during ${C_RESET}${C_BOLD}${CURRENT_STAGE}${C_RESET} ${C_DIM}(step ${CURRENT_STAGE_NUM}/${TOTAL_STAGES})${C_RESET}"
+    stage_line="  ${C_DIM}Stage   ${C_RESET}${C_BOLD}${CURRENT_STAGE}${C_RESET} ${C_DIM}(step ${CURRENT_STAGE_NUM} of ${TOTAL_STAGES})${C_RESET}"
   else
-    stage_line="${C_DIM}Stopped before ${C_RESET}${C_BOLD}any changes were made${C_RESET}"
+    stage_line="  ${C_DIM}Stage   ${C_RESET}${C_BOLD}startup — nothing was changed yet${C_RESET}"
   fi
 
   printf '\r\033[K'
@@ -990,15 +1032,18 @@ ui_interrupt_banner() {
     "" \
     "${C_BOLD}${C_YELLOW}⏸  INSTALLATION PAUSED${C_RESET}" \
     "" \
+    "${C_BOLD}WHY${C_RESET}" \
+    "  You pressed Ctrl+C (or the installer was sent a stop signal)" \
+    "" \
+    "${C_BOLD}WHERE${C_RESET}" \
     "${stage_line}" \
-    "${C_DIM}Progress       ${C_RESET}${bar} ${C_BOLD}${pct}%${C_RESET}" \
-    "${C_DIM}Ran for        ${C_RESET}${took}" \
+    "  ${C_DIM}Progress${C_RESET} $(_ui_progress_line)" \
+    "  ${C_DIM}Ran for ${C_RESET} ${took}" \
     "" \
     "${C_GREEN}✔${C_RESET} Progress saved — nothing was deleted or rolled back" \
     "${C_GREEN}✔${C_RESET} Half-finished package installs are repaired on resume" \
-    "" \
-    "${C_CYAN}↻${C_RESET} Resume any time:  ${C_BOLD}${INSTALLER_RERUN}${C_RESET}" \
-    "  ${C_DIM}it will offer to continue exactly where you stopped${C_RESET}" \
+    "${C_CYAN}↻${C_RESET} Resume any time: ${C_BOLD}${INSTALLER_RERUN}${C_RESET}" \
+    "  ${C_DIM}it offers to continue exactly where you stopped${C_RESET}" \
     ""
   ui_blank
 }
@@ -1006,19 +1051,75 @@ ui_interrupt_banner() {
 # ---- Failure banner ---------------------------------------------------------
 
 # ui_failure_banner [STAGE] [STEP] [REASON]
+# ui_failure_banner STAGE STEP REASON [HINT...] — where it failed, why, and
+# how to fix it. Long text is wrapped to fit the terminal.
 ui_failure_banner() {
   local stage="${1:-}" step="${2:-}" reason="${3:-}"
-  local -a lines=("" "${C_BOLD}${C_RED}✘  INSTALLATION FAILED${C_RESET}" "")
-  if [[ -n "${stage}" ]]; then
-    lines+=("${C_DIM}Stage   ${C_RESET}${C_BOLD}${stage}${C_RESET}")
+  shift 3 2>/dev/null || shift $#
+  local -a hints=("$@") lines=() wrapped=()
+  local w line first
+  w="$(_ui_box_width)"
+
+  lines=("" "${C_BOLD}${C_RED}✘  INSTALLATION FAILED${C_RESET}" "")
+
+  lines+=("${C_BOLD}WHERE${C_RESET}")
+  if [[ -n "${stage}" && "${CURRENT_STAGE_NUM}" -gt 0 ]]; then
+    lines+=("  ${C_DIM}Stage   ${C_RESET}${C_BOLD}${stage}${C_RESET} ${C_DIM}(step ${CURRENT_STAGE_NUM} of ${TOTAL_STAGES})${C_RESET}")
+    lines+=("  ${C_DIM}Progress${C_RESET} $(_ui_progress_line)")
+  else
+    lines+=("  ${C_DIM}Stage   ${C_RESET}${C_BOLD}${stage:-startup checks}${C_RESET}")
   fi
-  if [[ -n "${step}" ]]; then
-    lines+=("${C_DIM}Step    ${C_RESET}${step}")
-  fi
+  [[ -n "${step}" ]] && lines+=("  ${C_DIM}Step    ${C_RESET}${step}")
+
+  lines+=("" "${C_BOLD}WHY${C_RESET}")
   if [[ -n "${reason}" ]]; then
-    lines+=("${C_DIM}Reason  ${C_RESET}${C_YELLOW}${reason}${C_RESET}")
+    while IFS= read -r line; do
+      lines+=("  ${C_YELLOW}${line}${C_RESET}")
+    done < <(_ui_wrap "${reason}" $(( w - 2 )))
+  else
+    lines+=("  ${C_DIM}No error message was captured — see the log below.${C_RESET}")
   fi
-  lines+=("" "${C_GREEN}✔${C_RESET} Nothing was rolled back or deleted — re-running is safe" "")
+
+  if [[ "${#hints[@]}" -gt 0 ]]; then
+    lines+=("" "${C_BOLD}HOW TO FIX${C_RESET}")
+    local h
+    for h in "${hints[@]}"; do
+      first=1
+      while IFS= read -r line; do
+        if [[ "${first}" -eq 1 ]]; then
+          lines+=("  ${C_CYAN}→${C_RESET} ${line}"); first=0
+        else
+          lines+=("    ${line}")
+        fi
+      done < <(_ui_wrap "${h}" $(( w - 4 )))
+    done
+  fi
+
+  lines+=("" "${C_GREEN}✔${C_RESET} Nothing was rolled back or deleted"
+          "${C_CYAN}↻${C_RESET} Then re-run ${C_BOLD}${INSTALLER_RERUN}${C_RESET} ${C_DIM}— it continues from this step${C_RESET}" "")
   ui_blank
   ui_box "${C_RED}" "${lines[@]}"
+}
+
+# ui_cancel_banner CHOICE — the user chose to stop (Exit / No at a prompt).
+ui_cancel_banner() {
+  local choice="${1:-You chose to stop}" changed
+  if [[ "${CURRENT_STAGE_NUM}" -le 3 ]]; then
+    changed="${C_GREEN}✔${C_RESET} Nothing on this system was changed"
+  else
+    changed="${C_GREEN}✔${C_RESET} Finished steps are kept — nothing was rolled back"
+  fi
+  printf '\r\033[K'
+  ui_blank
+  ui_box "${C_CYAN}" \
+    "" \
+    "${C_BOLD}${C_CYAN}⏹  INSTALLATION CANCELLED${C_RESET}" \
+    "" \
+    "${C_BOLD}WHY${C_RESET}" \
+    "  ${choice}" \
+    "" \
+    "${changed}" \
+    "${C_CYAN}↻${C_RESET} Start again any time: ${C_BOLD}${INSTALLER_RERUN}${C_RESET}" \
+    ""
+  ui_blank
 }

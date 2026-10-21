@@ -395,7 +395,7 @@ check_resume() {
       exit 0
       ;;
     3) ui_info "Starting fresh..."; rm -f "${STATE_FILE}"; return 0 ;;
-    4) exit 0 ;;
+    4) user_cancel "You chose Exit at the 'previous installation' prompt." ;;
   esac
 }
 
@@ -448,7 +448,7 @@ select_frappe_version() {
   case "${choice}" in
     1) _apply_version_config "16" ;;
     2) _apply_version_config "15" ;;
-    3) exit 0 ;;
+    3) user_cancel "You chose Exit when picking the Frappe version." ;;
   esac
 }
 

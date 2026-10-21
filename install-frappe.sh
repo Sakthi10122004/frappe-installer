@@ -334,7 +334,22 @@ main_install() {
 # ENTRY POINT
 # ============================================================================
 
+# When started by `npm create frappe` / npx, npm exports its own settings as
+# npm_config_* variables. nvm refuses to run while npm_config_prefix is set,
+# and they would also redirect the installer's own `npm install -g yarn`.
+# (INSTALLER_RERUN in constants.sh has already read npm_command.)
+clear_npm_environment() {
+  local var
+  while IFS='=' read -r var _; do
+    case "${var}" in
+      npm_config_*|NPM_CONFIG_*) unset "${var}" ;;
+    esac
+  done < <(env)
+  unset PREFIX
+}
+
 main() {
+  clear_npm_environment
   parse_args "$@"
 
   # Install traps

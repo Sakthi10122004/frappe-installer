@@ -12,24 +12,45 @@
 
 VERIFY_WARNINGS=0
 PDF_READY=0
+VERIFY_PASSED=0
+VERIFY_TOTAL=0
+VERIFY_WARNING_LIST=()
+VERIFY_FAILED_LIST=()
+VERIFY_HIGHLIGHTS=()   # the strongest proofs, shown on the success screen
+HTTP_PROOF=""
+
+# Every check result goes through one of these, so the end screens can say
+# exactly what was verified (and what wasn't).
+_vpass() {
+  ui_ok "$1"
+  VERIFY_PASSED=$((VERIFY_PASSED + 1)); VERIFY_TOTAL=$((VERIFY_TOTAL + 1))
+}
+_vwarn() {
+  ui_warn "$1"
+  VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1)); VERIFY_TOTAL=$((VERIFY_TOTAL + 1))
+  VERIFY_WARNING_LIST+=("$1")
+}
+_vfail() {
+  ui_fail "$1"
+  VERIFY_FAILURES=$((VERIFY_FAILURES + 1)); VERIFY_TOTAL=$((VERIFY_TOTAL + 1))
+  VERIFY_FAILED_LIST+=("$1")
+}
 
 verify_check() {
   local label="$1"; shift
   if "$@" >> "${LOG_FILE}" 2>&1; then
-    ui_ok "${label}"
+    _vpass "${label}"
   else
-    ui_fail "${label}"
-    VERIFY_FAILURES=$((VERIFY_FAILURES + 1))
+    _vfail "${label}"
   fi
 }
 
 verify_warn_check() {
   local label="$1"; shift
   if "$@" >> "${LOG_FILE}" 2>&1; then
-    ui_ok "${label}"
+    _vpass "${label}"
   else
-    ui_warn "${label}"
-    VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+    _vwarn "${label}"
   fi
 }
 
@@ -38,6 +59,11 @@ verify_warn_check() {
 verify_all() {
   VERIFY_FAILURES=0
   VERIFY_WARNINGS=0
+  VERIFY_PASSED=0
+  VERIFY_TOTAL=0
+  VERIFY_WARNING_LIST=()
+  VERIFY_FAILED_LIST=()
+  VERIFY_HIGHLIGHTS=()
 
   cd "${BENCH_DIR}"
   export PATH="${HOME}/.local/bin:${PATH}"
@@ -84,10 +110,9 @@ verify_all() {
   _verify_security
   if command -v wkhtmltopdf >/dev/null 2>&1; then
     PDF_READY=1
-    ui_ok "PDF generation: wkhtmltopdf available"
+    _vpass "PDF generation: wkhtmltopdf available"
   else
-    ui_warn "PDF generation: wkhtmltopdf not available"
-    VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+    _vwarn "PDF generation: wkhtmltopdf not available"
   fi
 
   # HTTP health check: production is served by nginx + supervisor; local
@@ -98,7 +123,40 @@ verify_all() {
     _verify_http_health
   fi
 
+  _verify_highlights
   update_state "verification_complete" "true"
+}
+
+# _vfailed LABEL — true if the check named LABEL failed.
+_vfailed() {
+  local f
+  for f in "${VERIFY_FAILED_LIST[@]}"; do
+    [[ "${f}" == "$1"* ]] && return 0
+  done
+  return 1
+}
+
+# _verify_highlights — the few results that prove the install works, for
+# the success screen (in order of how convincing they are).
+_verify_highlights() {
+  local -a h=()
+  [[ -n "${HTTP_PROOF}" ]] && h+=("${HTTP_PROOF}")
+  if ! _vfailed "Site database accessible" && ! _vfailed "Administrator user provisioned"; then
+    h+=("Database connected · Administrator account created")
+  fi
+  if ! _vfailed "MariaDB running" && ! _vfailed "Redis responds" && ! _vfailed "Frontend assets built"; then
+    h+=("MariaDB, Redis and frontend assets all working")
+  fi
+  local w security_ok=1
+  for w in "${VERIFY_WARNING_LIST[@]}"; do
+    case "${w}" in
+      Reachable*|Credential*|MariaDB\ has*) security_ok=0 ;;
+    esac
+  done
+  if [[ "${security_ok}" -eq 1 ]]; then
+    h+=("Security: database local-only, credentials private")
+  fi
+  VERIFY_HIGHLIGHTS=("${h[@]}")
 }
 
 # ---- Security checks (warnings) ---------------------------------------------
@@ -121,10 +179,9 @@ _verify_security() {
     fi
   done
   if [[ -z "${exposed}" ]]; then
-    ui_ok "Database and Redis listen on localhost only"
+    _vpass "Database and Redis listen on localhost only"
   else
-    ui_warn "Reachable from the network on port(s):${exposed} — bind them to 127.0.0.1 or firewall them"
-    VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+    _vwarn "Reachable from the network on port(s):${exposed} — bind them to 127.0.0.1 or firewall them"
   fi
 
   # Credential files must be private.
@@ -135,10 +192,9 @@ _verify_security() {
     if [[ "${mode}" != "600" ]]; then bad+=" ${f} (${mode})"; fi
   done
   if [[ -z "${bad}" ]]; then
-    ui_ok "Credential files are private (chmod 600)"
+    _vpass "Credential files are private (chmod 600)"
   else
-    ui_warn "Credential files readable by others:${bad}"
-    VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+    _vwarn "Credential files readable by others:${bad}"
   fi
 
   # Anonymous MariaDB accounts let anyone log in without a user name.
@@ -146,10 +202,9 @@ _verify_security() {
     local anon
     anon="$(mariadb_exec "SELECT COUNT(*) FROM mysql.global_priv WHERE User='';" 2>/dev/null | tail -n 1 || true)"
     if [[ "${anon}" == "0" ]]; then
-      ui_ok "No anonymous MariaDB accounts"
+      _vpass "No anonymous MariaDB accounts"
     elif [[ -n "${anon}" ]]; then
-      ui_warn "MariaDB has ${anon} anonymous account(s) — remove them (DROP USER ''@'localhost')"
-      VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
+      _vwarn "MariaDB has ${anon} anonymous account(s) — remove them (DROP USER ''@'localhost')"
     fi
   fi
 }
@@ -162,9 +217,8 @@ _verify_http_health() {
   # Never kill someone else's server: if 8000 is taken, the probe would only
   # be talking to that process anyway.
   if port_in_use 8000; then
-    ui_warn "HTTP health check skipped: port 8000 is used by another process"
+    _vwarn "HTTP check skipped: port 8000 is used by another process"
     ui_line "  ${C_DIM}Free the port, then: cd \"${BENCH_DIR}\" && bench start${C_RESET}"
-    VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
     return 0
   fi
 
@@ -184,10 +238,10 @@ _verify_http_health() {
   fi
 
   if [[ "${http_ok}" -eq 1 ]]; then
-    ui_ok "HTTP health check (site responded with ${HTTP_PROBE_CODE})"
+    _vpass "HTTP health check (site responded with ${HTTP_PROBE_CODE})"
+    HTTP_PROOF="Site answered HTTP ${HTTP_PROBE_CODE} — it is up and serving pages"
   else
-    ui_fail "HTTP health check (site did not respond within timeout)"
-    VERIFY_FAILURES=$((VERIFY_FAILURES + 1))
+    _vfail "HTTP health check (site did not respond within timeout)"
   fi
 }
 
@@ -253,20 +307,27 @@ print_final_output() {
   local frappe_version
   frappe_version="$(cd "${BENCH_DIR}" && ./env/bin/python -c "import frappe; print(frappe.__version__)" 2>/dev/null || echo "${SELECTED_FRAPPE_VERSION}.x")"
 
+  local url="http://${SITE_NAME}:8000" start
+  start="cd $(ui_short_path "${BENCH_DIR}") && bench start"
+  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then
+    url="http://${SITE_NAME}"
+    [[ "${PROD_HTTPS}" -eq 1 ]] && url="https://${SITE_NAME}"
+    start="already running under supervisor (starts at boot)"
+  fi
+
   case "${health_state}" in
-    READY|READY_WITH_WARNINGS)
-      ui_success_banner "${SELECTED_FRAPPE_VERSION}"
+    READY|READY_WITH_WARNINGS|PARTIAL)
+      ui_success_banner "${SELECTED_FRAPPE_VERSION}" "${url}" "${start}"
       ui_stage_timeline
       ;;
-    PARTIAL)
-      ui_success_banner "${SELECTED_FRAPPE_VERSION}"
-      ui_warn "Installation completed with limitations."
-      ;;
     FAILED)
-      ui_failure_banner
-      ui_fail "Verification failed (${VERIFY_FAILURES} check(s))."
-      ui_line "See failures marked ✘ above, and details in: ${LOG_FILE}"
-      ui_line "Re-running ${INSTALLER_RERUN} is safe and will retry only what's needed."
+      local failed
+      failed="$(printf '%s; ' "${VERIFY_FAILED_LIST[@]}")"
+      FAILURE_REPORTED=1
+      ui_failure_banner "Verification" "health checks (${VERIFY_FAILURES} of ${VERIFY_TOTAL} failed)" \
+        "Installed, but these checks failed: ${failed%; }" \
+        "Re-run ${INSTALLER_RERUN}: it repairs what is missing and checks again." \
+        "The ✘ lines above say what each check tested; the log has the command output: ${LOG_FILE}"
       return 1
       ;;
   esac
@@ -275,11 +336,6 @@ print_final_output() {
   ui_summary_field "Framework" "Frappe ${frappe_version}"
   ui_summary_field "Bench" "${BENCH_DIR}"
   ui_summary_field "Site" "${SITE_NAME}"
-  local url="http://${SITE_NAME}:8000"
-  if [[ "${ENVIRONMENT_TYPE:-}" == "prod" ]]; then
-    url="http://${SITE_NAME}"
-    [[ "${PROD_HTTPS}" -eq 1 ]] && url="https://${SITE_NAME}"
-  fi
   ui_summary_field "URL" "${url}"
   ui_summary_field "Credentials" "${CREDENTIALS_FILE}"
 

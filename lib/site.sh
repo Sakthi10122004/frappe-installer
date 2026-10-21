@@ -233,7 +233,7 @@ create_site() {
               ui_info "Archived stale site folder to ${archive_dir}"
               # Fall through to create the site fresh below
               ;;
-            2) exit 0 ;;
+            2) user_cancel "You chose to fix site ${SITE_NAME}'s database connection manually." ;;
           esac
         else
           ui_skip "Site ${SITE_NAME}"
@@ -249,7 +249,7 @@ create_site() {
           ui_fail "Invalid or duplicate site name."
         done
         ;;
-      3) exit 0 ;;
+      3) user_cancel "You chose Exit because site ${SITE_NAME} already exists." ;;
     esac
   fi
 
@@ -459,7 +459,6 @@ show_installation_summary() {
   fi
 
   if ! ui_confirm "Proceed with installation?" 0; then
-    ui_line "No changes were made."
-    exit 0
+    user_cancel "You answered No at the installation summary."
   fi
 }

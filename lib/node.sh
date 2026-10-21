@@ -65,10 +65,35 @@ _install_nvm_verified() {
   done
 }
 
+# ---- ~/.npmrc compatibility --------------------------------------------------
+# nvm refuses to work when ~/.npmrc sets `prefix` or `globalconfig` (a common
+# way to avoid `sudo npm install -g`). Explain it, and only change the file
+# with the user's consent (keeping a backup).
+
+_check_npmrc_for_nvm() {
+  local rc="${HOME}/.npmrc" pattern='^[[:space:]]*(prefix|globalconfig)[[:space:]]*='
+  [[ -f "${rc}" ]] && grep -qE "${pattern}" "${rc}" || return 0
+
+  # shellcheck disable=SC2088  # "~/.npmrc" is shown to the user, not expanded
+  ui_warn "~/.npmrc sets a global npm location, which nvm (it manages Frappe's Node.js) can't work with:"
+  grep -nE "${pattern}" "${rc}" | sed 's/^/      /'
+  if [[ "${NON_INTERACTIVE}" -eq 1 ]] || \
+     ! ui_confirm "Comment out that line? (backup: ~/.npmrc.frappe-installer.bak)" 0; then
+    fail_fatal "Comment out the prefix/globalconfig line in ~/.npmrc, then re-run ${INSTALLER_RERUN}."
+    exit 1
+  fi
+  cp -p "${rc}" "${rc}.frappe-installer.bak"
+  sed -i -E "s/(${pattern})/# disabled by frappe-installer (incompatible with nvm): \\1/" "${rc}"
+  ui_ok "Commented out in ~/.npmrc (backup: ~/.npmrc.frappe-installer.bak)"
+  ui_line "  ${C_DIM}Packages already installed in that location stay there and keep working from your PATH.${C_RESET}"
+}
+
 # ---- Install Node.js -------------------------------------------------------
 
 install_node() {
   local required_node="${FRAPPE_CONFIG[node]}"
+
+  _check_npmrc_for_nvm
 
   # ---- Install NVM ----------------------------------------------------------
   if [[ ! -s "${NVM_DIR_PATH}/nvm.sh" ]]; then

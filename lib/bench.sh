@@ -47,7 +47,7 @@ init_bench() {
         return 1
       fi
       if ! ui_confirm "Use this existing Frappe ${bench_ver} bench anyway?"; then
-        exit 0
+        user_cancel "You chose not to reuse the Frappe ${bench_ver} bench at ${BENCH_DIR} for Frappe ${SELECTED_FRAPPE_VERSION}."
       fi
     fi
     ui_skip "Bench directory (${BENCH_DIR})"

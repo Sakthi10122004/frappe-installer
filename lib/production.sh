@@ -177,7 +177,6 @@ _production_node_link() {
       ui_skip "System Node.js ${required} at ${link}"
     else
       ui_warn "${link} is a different Node.js ($("${link}" --version 2>/dev/null)); socketio needs ${required}."
-      VERIFY_WARNINGS=$((VERIFY_WARNINGS + 1))
     fi
     return 0
   fi
@@ -292,10 +291,9 @@ verify_production() {
   total="$(grep -c . <<< "${status}" || true)"
   running="$(grep -c ' RUNNING ' <<< "${status}" || true)"
   if [[ "${total}" -gt 0 && "${running}" -eq "${total}" ]]; then
-    ui_ok "Supervisor: all ${total} Frappe processes running"
+    _vpass "Supervisor: all ${total} Frappe processes running"
   else
-    ui_fail "Supervisor: ${running}/${total} processes running (sudo supervisorctl status)"
-    VERIFY_FAILURES=$((VERIFY_FAILURES + 1))
+    _vfail "Supervisor: ${running}/${total} processes running (sudo supervisorctl status)"
   fi
 
   verify_check "nginx configuration valid" "${SUDO[@]}" nginx -t
@@ -308,9 +306,9 @@ verify_production() {
     sleep 1
   done
   if [[ "${code}" =~ ^(200|301|302|303|308)$ ]]; then
-    ui_ok "Site served by nginx (HTTP ${code} for ${SITE_NAME})"
+    _vpass "Site served by nginx (HTTP ${code} for ${SITE_NAME})"
+    HTTP_PROOF="nginx served ${SITE_NAME} (HTTP ${code}) — supervisor keeps it running"
   else
-    ui_fail "Site not served by nginx (HTTP ${code} for ${SITE_NAME})"
-    VERIFY_FAILURES=$((VERIFY_FAILURES + 1))
+    _vfail "Site not served by nginx (HTTP ${code} for ${SITE_NAME})"
   fi
 }

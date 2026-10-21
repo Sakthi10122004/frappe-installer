@@ -14,7 +14,7 @@ capture_redis_failure_evidence() {
 
 print_redis_likely_cause() {
   local cause
-  cause="$(tail -n 150 "${LOG_FILE}" 2>/dev/null | grep -iE "(Permission denied|Fatal error|OOM|\[ERR\]|\[ERROR\])" | grep -v "journalctl" | tail -n 1 | awk '{$1=$1;print}')"
+  cause="$(tail -n 150 "${LOG_FILE}" 2>/dev/null | grep -iE "(Permission denied|Fatal error|OOM|\[ERR\]|\[ERROR\])" | grep -v "journalctl" | tail -n 1 | awk '{$1=$1;print}' || true)"
   if [[ -n "${cause}" ]]; then
     ui_blank
     ui_line "  Likely cause: ${C_RED}${cause}${C_RESET}"
