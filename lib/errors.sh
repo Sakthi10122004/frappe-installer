@@ -20,7 +20,7 @@ on_error() {
     section="$(_failed_step_log "${step}")"
     reason="$(printf '%s\n' "${section}" \
       | grep -iE '(error|fatal|exception|traceback|no such|not found|denied|refused|cannot|failed|not compatible|incompatible)' \
-      | grep -v '^---- ' | tail -n 1 | cut -c1-90)"
+      | grep -v '^---- ' | tail -n 1 | cut -c1-90 || true)"
     # No recognisable error line: the step's last output line is the best clue.
     if [[ -z "${reason}" ]]; then
       reason="$(printf '%s\n' "${section}" | tail -n 1 | cut -c1-90)"
@@ -36,6 +36,11 @@ on_error() {
 
   # A check that failed with fail_fatal (no logged step) explains itself.
   [[ -z "${reason}" ]] && reason="${LAST_FATAL_MSG:-}"
+  # Neither: an unexpected error in the installer itself — say where.
+  if [[ -z "${reason}" ]]; then
+    reason="Unexpected error inside the installer (line ${line_no}: ${cmd}, exit ${exit_code}). Please report it with the log."
+  fi
+  log_only "FATAL: ${reason}"
 
   failure_hints "${section}"$'\n'"${reason}"
   FAILURE_REPORTED=1

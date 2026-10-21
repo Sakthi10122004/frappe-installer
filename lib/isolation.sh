@@ -275,12 +275,16 @@ _isolation_fingerprint() {
       cat sites/common_site_config.json sites/*/site_config.json Procfile apps.txt config/*.conf 2>/dev/null \
       | sha256sum | cut -c1-16)"
   done
-  if [[ "${DB_MODE}" != "shared" && -d /etc/mysql ]]; then
+  # The shared server's config — only if that server existed before (a first
+  # install of the mariadb-server package legitimately adds files there).
+  if [[ "${DB_MODE}" != "shared" && "${ISOLATION_SERVER_EXISTED:-0}" -eq 1 && -d /etc/mysql ]]; then
     printf '%s\t%s\n' "/etc/mysql" "$(find /etc/mysql -type f -exec cat {} + 2>/dev/null | sha256sum | cut -c1-16)"
   fi
 }
 
 isolation_snapshot() {
+  ISOLATION_SERVER_EXISTED=0
+  if dpkg -s mariadb-server >/dev/null 2>&1; then ISOLATION_SERVER_EXISTED=1; fi
   ISOLATION_BEFORE="$(_isolation_fingerprint)"
 }
 

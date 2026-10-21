@@ -112,7 +112,8 @@ if [[ "${rc}" -ne 0 ]]; then
     docker exec -u frappe "${name}" bash -c '
       log="$(ls -t ~/.frappe-installer/logs/*.log | head -n1)"
       step="$(grep -o "^---- FAILED (exit [0-9]*): .* ----$" "${log}" | tail -n1)"
-      reason="$(grep -iE "error|fatal|exception|denied|refused" "${log}" | grep -v "^----" | tail -n3 | tr "\n" " ")"
+      reason="$(grep "^FATAL: " "${log}" | tail -n2 | tr "\n" " ")"
+      [[ -n "${reason}" ]] || reason="$(grep -iE "error|exception|refused" "${log}" | grep -v "^----" | tail -n3 | tr "\n" " ")"
       echo "::error title=Installer failed (${step:-unknown step})::${reason:0:900}"'
   fi
 fi

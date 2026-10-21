@@ -141,7 +141,14 @@ _db_instance_apparmor() {
   for profile in /etc/apparmor.d/usr.sbin.mariadbd /etc/apparmor.d/mariadbd /etc/apparmor.d/usr.sbin.mysqld; do
     [[ -f "${profile}" ]] || continue
     [[ -e "/etc/apparmor.d/disable/$(basename "${profile}")" ]] && continue
-    name="$(grep -oE 'include( if exists)? <local/[^>]+>' "${profile}" | head -n1 | sed -E 's|.*<local/([^>]+)>.*|\1|')"
+    # Ubuntu 24.04+/Debian ship this file intentionally empty (AppArmor off
+    # for MariaDB): no profile, nothing to extend.
+    if ! grep -qE '^[[:space:]]*(profile[[:space:]]|/usr/s?bin/(mariadbd|mysqld)[[:space:]]*(flags=[^{]*)?\{)' "${profile}"; then
+      log_only "AppArmor: ${profile} defines no profile — nothing to extend"
+      continue
+    fi
+    name="$(grep -oE 'include( if exists)? <local/[^>]+>' "${profile}" | head -n1 \
+      | sed -E 's|.*<local/([^>]+)>.*|\1|' || true)"
     if [[ -z "${name}" ]]; then
       ui_warn "$(basename "${profile}") has no local/ include; environment databases may be blocked by AppArmor."
       continue

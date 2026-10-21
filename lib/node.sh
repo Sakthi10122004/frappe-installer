@@ -117,7 +117,7 @@ install_node() {
   # ---- Install required Node.js version -------------------------------------
   local have_major=""
   if nvm ls "${required_node}" >/dev/null 2>&1; then
-    have_major="$(nvm ls "${required_node}" --no-colors 2>/dev/null | grep -oE "v${required_node}\.[0-9]+\.[0-9]+" | head -n1)"
+    have_major="$(nvm ls "${required_node}" --no-colors 2>/dev/null | grep -oE "v${required_node}\.[0-9]+\.[0-9]+" | head -n1 || true)"
   fi
 
   if [[ -n "${have_major}" ]]; then

@@ -423,7 +423,7 @@ _ui_log_tail_line() {
   local line
   line="$(tail -c 4096 "$1" 2>/dev/null | tr '\r\t' '\n ' \
     | sed $'s/\033\\[[0-9;?]*[A-Za-z]//g' | tr -d '\000-\010\013-\037\177' \
-    | grep -vE '^(--|==|\+|[[:space:]]*$)' | tail -n 1)"
+    | grep -vE '^(--|==|\+|[[:space:]]*$)' | tail -n 1 || true)"
   line="${line#"${line%%[![:space:]]*}"}"
   printf '%s' "${line%"${line##*[![:space:]]}"}"
 }

@@ -26,7 +26,7 @@ install_redis() {
   local ver=""
 
   if command -v redis-server >/dev/null 2>&1; then
-    ver="$(redis-server --version 2>/dev/null | grep -oE 'v=[0-9]+\.[0-9]+' | cut -d= -f2)"
+    ver="$(redis-server --version 2>/dev/null | grep -oE 'v=[0-9]+\.[0-9]+' | cut -d= -f2 || true)"
   fi
 
   if [[ -n "${ver}" ]] && [[ "$(version_major "${ver}")" -ge "${required_min}" ]]; then
