@@ -15,7 +15,7 @@ jobs:
     name: version numbers agree
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: tag = package.json = INSTALLER_VERSION
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -36,8 +36,8 @@ jobs:
       contents: write   # create the GitHub Release
       id-token: write   # npm provenance (links the package to this commit)
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org

@@ -54,6 +54,7 @@ install_base_packages() {
     git curl wget ca-certificates gnupg lsb-release
     build-essential pkg-config
     xz-utils cron          # nvm's Node tarballs; bench's backup crontab
+    tzdata                 # time zones: new-site fails without it on minimal images
     python3-dev
     libffi-dev libssl-dev
     xvfb libfontconfig1

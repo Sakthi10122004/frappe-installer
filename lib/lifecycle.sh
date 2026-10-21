@@ -306,6 +306,27 @@ update_bench() {
   ui_ok "Frappe ${SELECTED_FRAPPE_VERSION} is up to date"
 }
 
+# _git_switch_app DIR REMOTE BRANCH — fetch BRANCH (works in the shallow,
+# single-branch clones bench makes) and check it out. Fails, changing
+# nothing, if the app has local changes that would be overwritten.
+_git_switch_app() {
+  local dir="$1" remote="$2" branch="$3"
+  local refspec="+refs/heads/${branch}:refs/remotes/${remote}/${branch}"
+  # Single-branch clones only track their original branch; track this one
+  # too, so it can be its upstream (and later `bench update` can pull it).
+  if ! git -C "${dir}" config --get-all "remote.${remote}.fetch" | grep -qxF "${refspec}"; then
+    git -C "${dir}" config --add "remote.${remote}.fetch" "${refspec}"
+  fi
+  git -C "${dir}" fetch --depth 1 "${remote}" "${refspec}"
+  git -C "${dir}" checkout -B "${branch}" "${remote}/${branch}"
+  git -C "${dir}" branch --set-upstream-to="${remote}/${branch}" "${branch}"
+}
+
+# _env_matches_python X.Y — the bench env runs Python X.Y.
+_env_matches_python() {
+  [[ -x env/bin/python ]] && env/bin/python --version 2>&1 | grep -q "^Python $1\."
+}
+
 # upgrade_bench — 15 → 16 in place.
 upgrade_bench() {
   _bench_env
@@ -318,15 +339,20 @@ upgrade_bench() {
   backup_all_sites
 
   if [[ "${current}" != "${SELECTED_FRAPPE_VERSION}" ]]; then
-    # Switch every app that has a matching branch; others are listed.
-    local -a apps=() missing=()
+    # Switch the code with git only. `bench switch-to-branch` would also
+    # reinstall each app into the current env — Python 3.10, which Frappe 16
+    # can't be installed into (SyntaxError) — and the env can't be rebuilt on
+    # 3.14 first either, as Frappe 15 refuses Python > 3.12.
+    local -a switched=() missing=()
     local app remote
     for app in apps/*/; do
       app="$(basename "${app}")"
       [[ -d "apps/${app}/.git" ]] || continue
       remote="$(git -C "apps/${app}" remote | head -n1)"
       if [[ -n "${remote}" ]] && git -C "apps/${app}" ls-remote --exit-code --heads "${remote}" "${target}" >/dev/null 2>&1; then
-        apps+=("${app}")
+        run_step "Switching ${app} to ${target}" "git switch ${app}" \
+          _git_switch_app "apps/${app}" "${remote}" "${target}"
+        switched+=("${app}")
       else
         missing+=("${app}")
       fi
@@ -334,16 +360,25 @@ upgrade_bench() {
     if [[ "${#missing[@]}" -gt 0 ]]; then
       ui_warn "No ${target} branch for: ${missing[*]} — left on their current branch."
     fi
-    run_step "Switching ${apps[*]} to ${target}" "bench switch-to-branch" \
-      bench switch-to-branch "${target}" "${apps[@]}" --upgrade
   else
     ui_skip "Apps already on ${target}"
   fi
 
+  # New env on the target Python; installs the (now v16) code of every app.
+  # bench keeps the old env in archived/envs/ (its default) for rollback.
   local python_path
   python_path="$(uv python find "${FRAPPE_CONFIG[python]}")"
-  run_step "Rebuilding the Python environment on Python ${FRAPPE_CONFIG[python]}" "bench migrate-env" \
-    bench migrate-env "${python_path}"
+  if ! _env_matches_python "${FRAPPE_CONFIG[python]}"; then
+    run_step "Rebuilding the Python environment on Python ${FRAPPE_CONFIG[python]}" "bench migrate-env" \
+      bench migrate-env "${python_path}"
+  fi
+  # migrate-env only logs a warning when an app fails to install; check.
+  if ! _env_matches_python "${FRAPPE_CONFIG[python]}" || ! env/bin/python -c "import frappe" >> "${LOG_FILE}" 2>&1; then
+    fail_fatal "The new Python ${FRAPPE_CONFIG[python]} environment is incomplete (frappe does not import)."
+    ui_line "  The previous environment is kept in ${BENCH_DIR}/archived/envs/. See the log for the pip error."
+    return 1
+  fi
+  ui_ok "Python environment: $(env/bin/python --version 2>&1)"
 
   bench_redis_start
   run_step "Installing requirements for Frappe ${SELECTED_FRAPPE_VERSION}" "bench setup requirements" \

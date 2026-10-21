@@ -11,7 +11,7 @@ jobs:
     name: shellcheck + unit tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
@@ -60,7 +60,7 @@ jobs:
             env: local
             then: --action upgrade --version 16 --path /home/frappe/frappe15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: install
         env:
           THEN: ${{ matrix.then }}
