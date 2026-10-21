@@ -45,7 +45,7 @@ on_error() {
   fi
 
   ui_blank
-  ui_line "  ${C_CYAN}↻${C_RESET} Fix the issue above and re-run ${C_BOLD}./${INSTALLER_NAME}${C_RESET} — it offers to continue from here."
+  ui_line "  ${C_CYAN}↻${C_RESET} Fix the issue above and re-run ${C_BOLD}${INSTALLER_RERUN}${C_RESET} — it offers to continue from here."
   exit "${exit_code}"
 }
 

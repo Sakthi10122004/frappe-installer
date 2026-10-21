@@ -79,6 +79,12 @@ assert_eq "progress bar: newest update only" "DocTypes [==>] 70%" "$(_ui_log_tai
 printf '\n---- bench init ----\n+ bench init x\nUsage: bench init\nError: No such option: --depth\n---- FAILED (exit 2): bench init ----\n' >> "${LOG_FILE}"
 assert_eq "failed step output isolated" $'Usage: bench init\nError: No such option: --depth' "$(_failed_step_log "bench init")"
 
+echo "== packaging =="
+assert_eq "package.json version = INSTALLER_VERSION" "${INSTALLER_VERSION}" \
+  "$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
+assert_eq "npm bin points at the installer" "install-frappe.sh" \
+  "$(python3 -c 'import json; print(json.load(open("package.json"))["bin"]["create-frappe"])')"
+
 echo ""
 echo "============================================================"
 echo "RESULTS: ${PASS} passed, ${FAIL} failed"

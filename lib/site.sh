@@ -256,7 +256,10 @@ create_site() {
   # Database name and password are left to Frappe (random, unique), so a
   # recreated site never collides with an old database, and the DB password
   # never appears on a command line. They are read back afterwards.
-  local -a db_args=()
+  # The admin *login* goes on the command line (not a secret): Frappe 15
+  # ignores root_login in config and would fall back to "root". Passwords
+  # stay in the private config entry (see _bench_secrets).
+  local -a db_args=(--mariadb-root-username "${MARIADB_ADMIN_USER}")
   if [[ -n "${DB_HOST}" ]]; then
     db_args+=(--db-host "${DB_HOST}" --db-port "${DB_PORT:-3306}")
     # The site's DB user must be allowed to log in from this machine, not

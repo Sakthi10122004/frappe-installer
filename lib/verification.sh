@@ -266,7 +266,7 @@ print_final_output() {
       ui_failure_banner
       ui_fail "Verification failed (${VERIFY_FAILURES} check(s))."
       ui_line "See failures marked ✘ above, and details in: ${LOG_FILE}"
-      ui_line "Re-running ./${INSTALLER_NAME} is safe and will retry only what's needed."
+      ui_line "Re-running ${INSTALLER_RERUN} is safe and will retry only what's needed."
       return 1
       ;;
   esac

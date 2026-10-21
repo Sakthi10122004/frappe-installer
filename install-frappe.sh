@@ -24,7 +24,9 @@
 set -Eeuo pipefail
 
 # ---- Determine script directory (handles spaces in paths) -------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Installed with npm, this file is run through a symlink in node_modules/.bin;
+# resolve it so lib/ is found next to the real file.
+SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
 # ---- Source all library modules ---------------------------------------------
 source "${SCRIPT_DIR}/lib/constants.sh"
@@ -61,7 +63,7 @@ ${INSTALLER_NAME} v${INSTALLER_VERSION}
 Universal Frappe Framework Installer & Environment Manager.
 
 USAGE:
-  ./${INSTALLER_NAME} [OPTIONS]
+  ${INSTALLER_RERUN} [OPTIONS]
 
 OPTIONS:
   --version VERSION    Frappe version to install (15 or 16). Default: interactive
@@ -85,14 +87,14 @@ OPTIONS:
   -h, --help           Show this help and exit.
 
 EXAMPLES:
-  ./${INSTALLER_NAME}
-  ./${INSTALLER_NAME} --version 16
-  ./${INSTALLER_NAME} --version 15 --site college.local
-  ./${INSTALLER_NAME} --env prod --version 16
-  ./${INSTALLER_NAME} --non-interactive --env local --version 16 --site dev.local
-  ./${INSTALLER_NAME} --non-interactive --env prod --version 16 \
+  ${INSTALLER_RERUN}
+  ${INSTALLER_RERUN} --version 16
+  ${INSTALLER_RERUN} --version 15 --site college.local
+  ${INSTALLER_RERUN} --env prod --version 16
+  ${INSTALLER_RERUN} --non-interactive --env local --version 16 --site dev.local
+  ${INSTALLER_RERUN} --non-interactive --env prod --version 16 \
       --domain erp.example.com --letsencrypt-email admin@example.com
-  ./${INSTALLER_NAME} --non-interactive --env local --path ~/frappe15 --action upgrade --version 16
+  ${INSTALLER_RERUN} --non-interactive --env local --path ~/frappe15 --action upgrade --version 16
 
 Re-running this script is safe: it detects what is already installed and
 configured, and only performs the steps that are still needed.
@@ -164,7 +166,7 @@ parse_args() {
         print_help; exit 0 ;;
       *)
         echo "Error: unknown option '$1'" >&2
-        echo "Run './${INSTALLER_NAME} --help' for usage." >&2
+        echo "Run '${INSTALLER_RERUN} --help' for usage." >&2
         exit 2 ;;
     esac
   done

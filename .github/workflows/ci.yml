@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-  pull_request:
-  workflow_dispatch:
+    branches: [main]   # tags run CI through release.yml instead
+  workflow_dispatch:   # manual run from the Actions tab
+  workflow_call:       # used by release.yml before publishing
 
 jobs:
   lint-and-unit:

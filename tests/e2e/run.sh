@@ -75,6 +75,15 @@ fi
 if [[ "${rc}" -ne 0 ]]; then
   echo "==> Last 60 lines of the installer log:"
   docker exec -u frappe "${name}" bash -c 'tail -n 60 "$(ls -t ~/.frappe-installer/logs/*.log | head -n1)"'
+  # On GitHub, surface the failing step as an annotation: those are public,
+  # unlike job logs, so a failure can be read without signing in.
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    docker exec -u frappe "${name}" bash -c '
+      log="$(ls -t ~/.frappe-installer/logs/*.log | head -n1)"
+      step="$(grep -o "^---- FAILED (exit [0-9]*): .* ----$" "${log}" | tail -n1)"
+      reason="$(grep -iE "error|fatal|exception|denied|refused" "${log}" | grep -v "^----" | tail -n3 | tr "\n" " ")"
+      echo "::error title=Installer failed (${step:-unknown step})::${reason:0:900}"'
+  fi
 fi
 exit "${rc}"
 }

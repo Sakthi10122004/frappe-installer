@@ -33,13 +33,36 @@ The installer automatically checks for these requirements and will warn or block
 
 ## Installation & Usage
 
-Clone this repository and run the entry script:
+**With Node.js/npm already installed:**
 
 ```bash
-git clone https://github.com/your-username/frappe-installer.git
+npm create frappe@latest          # or: npx create-frappe
+npm create frappe@latest -- --env local --version 16   # pass options after --
+```
+
+Or install the command once: `npm install -g create-frappe`, then run `create-frappe`.
+(`npm install` alone never runs the installer — it has no install scripts.)
+
+**On a fresh server without Node.js** — download a release, check it, run it:
+
+```bash
+v=0.0.1   # latest version: https://github.com/Sakthi10122004/frappe-installer/releases
+base="https://github.com/Sakthi10122004/frappe-installer/releases/download/v${v}"
+curl -fLO "${base}/create-frappe-${v}.tgz" -fLO "${base}/SHA256SUMS"
+sha256sum -c SHA256SUMS && tar -xzf "create-frappe-${v}.tgz"
+./package/install-frappe.sh
+```
+
+**From a git checkout:**
+
+```bash
+git clone https://github.com/Sakthi10122004/frappe-installer.git
 cd frappe-installer
 ./install-frappe.sh
 ```
+
+Releases are published from CI only after the full test matrix passes, with
+[npm provenance](https://docs.npmjs.com/generating-provenance-statements) linking each package to the commit it was built from.
 
 ### Options
 

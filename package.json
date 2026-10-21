@@ -1,0 +1,38 @@
+{
+  "name": "create-frappe",
+  "version": "0.0.1",
+  "description": "Install the Frappe Framework (v15/v16) on Ubuntu/Debian — local or production, resumable, verified. Run: npm create frappe",
+  "keywords": [
+    "frappe",
+    "erpnext",
+    "installer",
+    "bench",
+    "mariadb",
+    "create"
+  ],
+  "homepage": "https://github.com/Sakthi10122004/frappe-installer#readme",
+  "bugs": "https://github.com/Sakthi10122004/frappe-installer/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sakthi10122004/frappe-installer.git"
+  },
+  "license": "MIT",
+  "author": "sakthi10122004",
+  "bin": {
+    "create-frappe": "install-frappe.sh",
+    "frappe-installer": "install-frappe.sh"
+  },
+  "files": [
+    "install-frappe.sh",
+    "lib/",
+    "config/",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "linux"
+  ],
+  "engines": {
+    "node": ">=16"
+  }
+}

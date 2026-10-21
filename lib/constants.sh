@@ -10,6 +10,17 @@ INSTALLER_NAME="install-frappe.sh"
 INSTALLER_VERSION="0.0.1"
 INSTALLER_CODENAME="frappe-installer"
 
+# How the user should run the installer again, as they started it:
+# ./install-frappe.sh from a checkout, `create-frappe` when installed with
+# npm, or `npx create-frappe` for npx / `npm create frappe`.
+case "$(basename "$0")" in
+  install-frappe.sh) INSTALLER_RERUN="./${INSTALLER_NAME}" ;;
+  *)                 INSTALLER_RERUN="$(basename "$0")" ;;
+esac
+case "${npm_command:-}" in
+  exec|init) INSTALLER_RERUN="npx create-frappe" ;;
+esac
+
 # ---- Registry / state paths ------------------------------------------------
 INSTALLER_HOME="${HOME}/.frappe-installer"
 INSTALLER_REGISTRY="${INSTALLER_HOME}/environments.json"

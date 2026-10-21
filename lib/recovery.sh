@@ -12,11 +12,11 @@ run_repair() {
   ui_info "For now, you can use the following manual recovery scripts:"
   ui_blank
   ui_line "  MariaDB issues:"
-  ui_line "    ./${INSTALLER_NAME} --doctor --component mariadb   # Diagnose, repair, or use an external DB"
+  ui_line "    ${INSTALLER_RERUN} --doctor --component mariadb   # Diagnose, repair, or use an external DB"
   ui_line "    sudo bash tools/fix_apparmor.sh   # Fix AppArmor blocking MariaDB"
   ui_line "    sudo bash tools/fix_mariadb.sh    # Full purge and reinstall (DELETES ALL DATABASES)"
   ui_blank
   ui_line "  General:"
-  ui_line "    Re-run ./${INSTALLER_NAME}  # Safe to re-run, skips completed steps"
+  ui_line "    Re-run ${INSTALLER_RERUN}  # Safe to re-run, skips completed steps"
   exit 0
 }

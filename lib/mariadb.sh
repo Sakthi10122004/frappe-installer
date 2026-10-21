@@ -96,7 +96,7 @@ install_mariadb() {
     print_mariadb_likely_cause
     ui_blank
     ui_line "  Please run the diagnostic tool to identify the issue:"
-    ui_line "  ${C_CYAN}./${INSTALLER_NAME} --doctor --component mariadb${C_RESET}"
+    ui_line "  ${C_CYAN}${INSTALLER_RERUN} --doctor --component mariadb${C_RESET}"
     ui_blank
     return 1
   fi
@@ -114,7 +114,7 @@ install_mariadb() {
 _clear_legacy_bypass_flag() {
   if [[ "$(read_state "mariadb_bypassed")" == "true" ]] && ! mariadb_is_external; then
     ui_warn "Ignoring an old 'bypass MariaDB' setting that had no server details."
-    ui_line "  ${C_DIM}To use a remote/Docker MariaDB, run: ./${INSTALLER_NAME} --doctor --component mariadb${C_RESET}"
+    ui_line "  ${C_DIM}To use a remote/Docker MariaDB, run: ${INSTALLER_RERUN} --doctor --component mariadb${C_RESET}"
     update_state "mariadb_bypassed" "false"
   fi
 }
@@ -627,7 +627,7 @@ detect_mariadb_admin_auth() {
     _use_admin_cnf "${MARIADB_EXTERNAL_CNF}"
     if ! _mariadb_cnf_works "${MARIADB_EXTERNAL_CNF}"; then
       fail_fatal "Cannot connect to the external MariaDB at ${DB_HOST}:${DB_PORT:-3306} as ${MARIADB_ADMIN_USER}."
-      ui_line "  Check the server, or re-enter details: ./${INSTALLER_NAME} --doctor --component mariadb"
+      ui_line "  Check the server, or re-enter details: ${INSTALLER_RERUN} --doctor --component mariadb"
       ui_line "  To use a local MariaDB instead, delete ${MARIADB_EXTERNAL_CNF}"
       return 1
     fi

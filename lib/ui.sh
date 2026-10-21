@@ -997,7 +997,7 @@ ui_interrupt_banner() {
     "${C_GREEN}✔${C_RESET} Progress saved — nothing was deleted or rolled back" \
     "${C_GREEN}✔${C_RESET} Half-finished package installs are repaired on resume" \
     "" \
-    "${C_CYAN}↻${C_RESET} Resume any time:  ${C_BOLD}./${INSTALLER_NAME}${C_RESET}" \
+    "${C_CYAN}↻${C_RESET} Resume any time:  ${C_BOLD}${INSTALLER_RERUN}${C_RESET}" \
     "  ${C_DIM}it will offer to continue exactly where you stopped${C_RESET}" \
     ""
   ui_blank

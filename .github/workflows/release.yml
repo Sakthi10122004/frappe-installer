@@ -1,0 +1,59 @@
+name: Release
+
+# Push a tag like v0.1.0 to publish. Nothing is published unless the full CI
+# (lint, unit tests, fresh-machine installs) passes on that exact commit.
+#
+# One-time setup: add an npm automation token as the repository secret
+# NPM_TOKEN (Settings → Secrets and variables → Actions).
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  versions:
+    name: version numbers agree
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag = package.json = INSTALLER_VERSION
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p 'require("./package.json").version')"
+          sh_ver="$(sed -n 's/^INSTALLER_VERSION="\(.*\)"$/\1/p' lib/constants.sh)"
+          echo "tag=${tag} package.json=${pkg} INSTALLER_VERSION=${sh_ver}"
+          [[ "${tag}" == "${pkg}" && "${pkg}" == "${sh_ver}" ]]
+
+  ci:
+    needs: versions
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: publish to npm + GitHub Release
+    needs: ci
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # create the GitHub Release
+      id-token: write   # npm provenance (links the package to this commit)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: pack
+        run: |
+          npm pack
+          sha256sum create-frappe-*.tgz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: publish to npm (with provenance)
+        run: npm publish create-frappe-*.tgz --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: GitHub Release (tarball + checksums, for servers without Node)
+        run: gh release create "${GITHUB_REF_NAME}" create-frappe-*.tgz SHA256SUMS --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
