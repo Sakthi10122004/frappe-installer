@@ -150,7 +150,19 @@ _env_write_ports() {
   bench set-config -g redis_queue "redis://127.0.0.1:${REDIS_QUEUE_PORT}"
   bench set-config -g redis_socketio "redis://127.0.0.1:${REDIS_QUEUE_PORT}"
   bench setup redis
-  bench setup procfile --yes 2>/dev/null || bench setup procfile
+  # `bench setup procfile` has no --yes (it asks before overwriting), and
+  # only the web port in the Procfile depends on the environment — socketio
+  # and redis read theirs from the config just written. Set it in place.
+  python3 - Procfile "${WEB_PORT}" <<'PYEOF'
+import re, sys
+path, port = sys.argv[1], sys.argv[2]
+lines = open(path).read().split("\n")
+for i, line in enumerate(lines):
+    if line.startswith("web:"):
+        line = re.sub(r"\s+--port\s+\d+", "", line).rstrip()
+        lines[i] = f"{line} --port {port}"
+open(path, "w").write("\n".join(lines))
+PYEOF
 }
 
 # env_write_start_script — <bench>/start: runs `bench start` with this
