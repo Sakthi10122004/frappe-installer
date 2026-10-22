@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frappe Installer</title>
+<meta name="description" content="Install the Frappe Framework (v15 or v16) on Ubuntu or Debian with one command — isolated, resumable, self-healing and verified.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  /* The installer's terminal palette: the banner gradient
+     (cyan → blue → violet) plus the status colours. */
+  :root {
+    --bg: #0a0c12;
+    --bg-raised: #10131b;
+    --bg-card: #121621;
+    --line: #232838;
+    --line-soft: #1a1e2b;
+    --text: #d7dbe6;
+    --text-dim: #8089a0;
+    --text-faint: #565e75;
+    --cyan: rgb(0, 212, 255);
+    --blue: rgb(64, 120, 255);
+    --violet: rgb(168, 85, 247);
+    --green: #3fd38a;
+    --yellow: #f2c94c;
+    --red: #ff6b6b;
+    --grad: linear-gradient(90deg, var(--cyan), var(--blue) 50%, var(--violet));
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  /* faint scanline + glow, like a terminal screen */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(900px 500px at 15% -10%, rgba(0, 212, 255, .10), transparent 60%),
+      radial-gradient(800px 500px at 90% 10%, rgba(168, 85, 247, .10), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
+    pointer-events: none;
+    z-index: -1;
+  }
+  a { color: var(--cyan); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+  .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .dim { color: var(--text-dim); }
+  .ok { color: var(--green); }
+  .warn { color: var(--yellow); }
+  .err { color: var(--red); }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(10, 12, 18, .82);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 56px; gap: 16px; }
+  .brand { font-weight: 800; letter-spacing: .5px; white-space: nowrap; }
+  .brand .prompt { color: var(--text-dim); font-weight: 400; }
+  nav ul { list-style: none; display: flex; gap: 22px; margin: 0; padding: 0; font-size: 13px; }
+  nav ul a { color: var(--text-dim); }
+  nav ul a:hover { color: var(--text); text-decoration: none; }
+  @media (max-width: 720px) { nav ul { display: none; } }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 64px 0 40px; text-align: center; }
+  .logo {
+    display: inline-block;
+    margin: 0 auto;
+    font-size: clamp(5.2px, 1.55vw, 13.5px);
+    line-height: 1.12;
+    font-weight: 700;
+    white-space: pre;
+    text-align: left;
+  }
+  .logo .row { display: block; opacity: 0; transform: translateY(6px); animation: rise .5s ease forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .tagline { margin: 26px auto 0; max-width: 720px; font-size: clamp(16px, 2.2vw, 20px); color: var(--text); }
+  .tagline .cursor { display: inline-block; width: .6em; height: 1.1em; background: var(--cyan); vertical-align: -0.18em; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .sub { color: var(--text-dim); max-width: 640px; margin: 14px auto 0; font-size: 14px; }
+
+  .cmd {
+    margin: 34px auto 0;
+    display: inline-flex; align-items: center; gap: 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 12px 12px 12px 20px;
+    font-size: clamp(14px, 2vw, 18px);
+    max-width: 100%;
+    position: relative;
+  }
+  .cmd::before {
+    content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px;
+    background: var(--grad);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    opacity: .7;
+    pointer-events: none;   /* decorative border layer: must not swallow clicks */
+  }
+  .cmd code { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cmd .dollar { color: var(--text-faint); }
+  .copy {
+    font: inherit; font-size: 12px;
+    background: #1b2030; color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 7px 12px; cursor: pointer; flex-shrink: 0;
+  }
+  .copy:hover { border-color: var(--blue); }
+  .copy.done { color: var(--green); border-color: var(--green); }
+  .copy.fail { color: var(--yellow); border-color: var(--yellow); }
+  .note { margin: 14px auto 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.8; }
+  .note b { color: var(--green); }
+  .note code { color: var(--text); background: #161a26; padding: 1px 6px; border-radius: 4px; }
+  .hero-meta { margin-top: 18px; font-size: 12.5px; color: var(--text-dim); display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
+  .hero-meta span::before { content: "✔ "; color: var(--green); }
+
+  /* segmented progress bar (installer stage track) */
+  .track { display: flex; gap: 6px; justify-content: center; margin: 44px auto 0; max-width: 560px; }
+  .track i { flex: 1; height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; position: relative; }
+  .track i::after { content: ""; position: absolute; inset: 0; background: var(--grad); background-size: 1000% 100%; transform: scaleX(0); transform-origin: left; animation: fill .5s ease forwards; }
+  @keyframes fill { to { transform: scaleX(1); } }
+
+  /* ---------- sections ---------- */
+  section { padding: 76px 0; }
+  .eyebrow { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--text-dim); }
+  .eyebrow b { color: var(--cyan); font-weight: 700; }
+  h2 { font-size: clamp(22px, 3.4vw, 32px); line-height: 1.25; margin: 10px 0 14px; font-weight: 800; letter-spacing: -.5px; }
+  .lead { color: var(--text-dim); max-width: 700px; margin: 0 0 34px; }
+  .rule { height: 1px; background: var(--grad); opacity: .35; border: 0; margin: 0; }
+
+  /* ---------- terminal window ---------- */
+  .term {
+    background: #07090e;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,.7), 0 0 0 1px rgba(64,120,255,.06);
+    overflow: hidden;
+    text-align: left;
+  }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 11px 14px; background: #0f121a; border-bottom: 1px solid var(--line-soft); }
+  .term-bar i { width: 11px; height: 11px; border-radius: 50%; background: #2a2f3e; }
+  .term-bar i:nth-child(1) { background: #ff5f57; } .term-bar i:nth-child(2) { background: #febc2e; } .term-bar i:nth-child(3) { background: #28c840; }
+  .term-bar span { margin-left: 10px; font-size: 12px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .term-bar button { margin-left: auto; white-space: nowrap; flex-shrink: 0; font: inherit; font-size: 11px; color: var(--text-dim); background: none; border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+  .term-bar button:hover { color: var(--text); border-color: var(--blue); }
+  .term-body {
+    padding: 18px 20px 22px;
+    font-size: clamp(10.5px, 1.45vw, 13.5px);
+    line-height: 1.6;
+    height: 540px;
+    overflow: hidden;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .term-body .l { display: block; min-height: 1.6em; }
+  .s-head { font-weight: 700; }
+  .s-num { font-weight: 700; }
+
+  /* ---------- pain points ---------- */
+  .pain { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .pain-item { background: var(--bg-raised); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 18px 20px; }
+  .pain-item h3 { margin: 0 0 6px; font-size: 14.5px; display: flex; gap: 10px; align-items: baseline; }
+  .pain-item h3::before { content: "✘"; color: var(--red); }
+  .pain-item p { margin: 0; font-size: 13px; color: var(--text-dim); }
+
+  .versus { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 30px; }
+  @media (max-width: 760px) { .versus { grid-template-columns: 1fr; } }
+  .vs-box { border-radius: var(--radius); border: 1px solid var(--line); background: #07090e; overflow: hidden; }
+  .vs-box header { padding: 10px 16px; font-size: 12px; border-bottom: 1px solid var(--line-soft); display: flex; justify-content: space-between; }
+  .vs-box pre { margin: 0; padding: 14px 16px; font: inherit; font-size: 12px; line-height: 1.55; color: var(--text-dim); max-height: 290px; overflow: hidden; position: relative; }
+  .vs-box.manual pre::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 90px; background: linear-gradient(transparent, #07090e); }
+  .vs-box.one pre { color: var(--text); min-height: 290px; padding-top: 60px; }
+
+  /* ---------- pipeline (what it does) ---------- */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; counter-reset: s; }
+  .step { position: relative; background: var(--bg-raised); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 16px 18px 16px; }
+  .step .n { font-weight: 800; font-size: 13px; }
+  .step .n small { color: var(--text-faint); font-weight: 400; }
+  .step h3 { margin: 4px 0 6px; font-size: 14.5px; }
+  .step p { margin: 0; font-size: 12.5px; color: var(--text-dim); }
+  .step .bar { position: absolute; left: 18px; right: 18px; top: 0; height: 2px; background: var(--grad); opacity: .55; border-radius: 2px; }
+
+  /* ---------- feature cards (the installer's option cards) ---------- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .card {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 24px 20px 18px;
+    background: var(--bg-card);
+    transition: transform .2s ease, border-color .2s ease;
+  }
+  .card .key {
+    position: absolute; top: -10px; left: 14px;
+    background: var(--bg); padding: 0 6px;
+    font-size: 12px; color: var(--text-faint);
+  }
+  .card::before {
+    content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px;
+    background: var(--grad); background-size: 300% 100%;
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    opacity: 0; transition: opacity .25s ease;
+    animation: flow 4s linear infinite;
+    pointer-events: none;
+  }
+  .card:hover { transform: translateY(-3px); border-color: transparent; }
+  .card:hover::before { opacity: 1; }
+  .card:hover .key { color: var(--cyan); }
+  @keyframes flow { to { background-position: 300% 0; } }
+  .card h3 { margin: 0 0 4px; font-size: 15.5px; display: flex; gap: 10px; align-items: baseline; }
+  .card h3 .mark { font-size: 13px; }
+  .card .tag { font-size: 12.5px; margin: 0 0 10px; }
+  .card ul { list-style: none; margin: 0; padding: 0; font-size: 12.5px; color: var(--text-dim); }
+  .card li { padding-left: 16px; position: relative; margin: 3px 0; }
+  .card li::before { content: "·"; position: absolute; left: 4px; color: var(--text-faint); }
+  .card:hover h3 .mark { color: var(--cyan); }
+
+  /* ---------- architecture ---------- */
+  .layers { display: grid; gap: 12px; }
+  .layer { border-radius: var(--radius); border: 1px solid var(--line); padding: 16px 20px; background: var(--bg-raised); }
+  .layer header { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13px; margin-bottom: 8px; }
+  .layer header b { font-weight: 800; letter-spacing: 1px; }
+  .layer header span { color: var(--text-dim); }
+  .layer p { margin: 0; font-size: 12.5px; color: var(--text-dim); }
+  .envs { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 10px; }
+  .env { border: 1px dashed #2c3346; border-radius: 8px; padding: 12px 14px; font-size: 12px; line-height: 1.7; background: #0c0f16; }
+  .env b { color: var(--text); }
+  .env .p { color: var(--cyan); }
+
+  /* ---------- platforms ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line-soft); }
+  th { color: var(--text-dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  td .ok, td .dim { font-weight: 700; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--bg-raised); }
+
+  /* ---------- install ---------- */
+  .install { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .inst { position: relative; border: 1px solid var(--line); border-radius: var(--radius); background: #07090e; padding: 16px 18px; }
+  .inst-copy { position: absolute; top: 12px; right: 12px; }
+  .inst h3 { font-size: 13.5px; margin: 0 0 4px; }
+  .inst p { margin: 0 0 12px; font-size: 12.5px; color: var(--text-dim); }
+  .inst pre { margin: 0; font: inherit; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+  .inst pre .c { color: var(--text-faint); }
+
+  footer { border-top: 1px solid var(--line-soft); padding: 34px 0 50px; font-size: 12.5px; color: var(--text-dim); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+  .reveal { opacity: 0; transform: translateY(14px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .logo .row, .reveal { opacity: 1; transform: none; }
+    .track i::after { transform: scaleX(1); }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <div class="brand"><span class="prompt">$ </span><span class="grad">frappe-installer</span></div>
+    <ul>
+      <li><a href="#why">Why</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#isolation">Isolation</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="https://github.com/Sakthi10122004/frappe-installer">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ======================= HERO ======================= -->
+<header class="hero">
+  <div class="wrap">
+    <div class="logo" id="logo" aria-label="Frappe Installer"></div>
+    <p class="tagline"><span id="typed"></span><span class="cursor"></span></p>
+    <p class="sub">Frappe 15 or 16 on Ubuntu or Debian — local development or a production server.
+      Isolated, resumable, self-healing, and verified before it says it's done.</p>
+
+    <div class="cmd">
+      <code><span class="dollar">$ </span><span class="grad">npm create frappe@latest</span></code>
+      <button class="copy" data-copy="npm create frappe@latest">copy</button>
+    </div>
+    <p class="note">npm downloads it for you — press <b>y</b> when it asks <i>“Ok to proceed?”</i>
+      <br>or install the command once: <code>npm i -g create-frappe</code> then <code>create-frappe</code></p>
+    <div class="hero-meta">
+      <span>Frappe 15 &amp; 16</span><span>Ubuntu 22.04 – 26.04</span><span>Debian 12 &amp; 13</span><span>local &amp; production</span>
+    </div>
+
+    <div class="track" id="track" aria-hidden="true"></div>
+  </div>
+</header>
+
+<!-- ======================= DEMO TERMINAL ======================= -->
+<section style="padding-top: 20px">
+  <div class="wrap">
+    <div class="term reveal">
+      <div class="term-bar"><i></i><i></i><i></i><span>~ — npm create frappe@latest</span><button id="replay">↻ replay</button></div>
+      <div class="term-body" id="screen" aria-label="A recorded install, replayed"></div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ======================= WHY (THE PROBLEM) ======================= -->
+<section id="why">
+  <div class="wrap">
+    <div class="eyebrow reveal"><b>01</b> · the problem</div>
+    <h2 class="reveal">Installing Frappe by hand is <span class="grad">a long, fragile ritual</span>.</h2>
+    <p class="lead reveal">The official guide is dozens of steps, and every one of them has to match your
+      OS, your Frappe version and whatever is already on the machine. One mismatch and you're
+      reading tracebacks at midnight.</p>
+
+    <div class="pain">
+      <div class="pain-item reveal"><h3>Exact versions, or nothing</h3><p>Frappe 16 needs Python 3.14 (exactly), Node 24, MariaDB 11.8 and Redis — Frappe 15 needs Python 3.10 and Node 18. The system's own versions are usually wrong.</p></div>
+      <div class="pain-item reveal"><h3>MariaDB is a minefield</h3><p>utf8mb4 settings, root using socket auth, a password nobody wrote down, and on Ubuntu an AppArmor profile that silently blocks the database from starting.</p></div>
+      <div class="pain-item reveal"><h3>Node.js mismatches</h3><p>An older system Node makes <code>bench start</code> fail with "engine node is incompatible" — even after you installed the right one, if the terminal was already open.</p></div>
+      <div class="pain-item reveal"><h3>Two benches collide</h3><p>A second install reuses the same ports (8000, 13000, 11000) and the same database server — they can't run together, and their caches and job queues mix.</p></div>
+      <div class="pain-item reveal"><h3>Upgrades break halfway</h3><p>15 → 16 means switching branches, rebuilding the Python environment on a new version and migrating — in the right order, or it fails with a SyntaxError.</p></div>
+      <div class="pain-item reveal"><h3>Production is another project</h3><p>nginx, supervisor, the scheduler, HTTPS, a firewall, file permissions for www-data — and <code>bench setup production</code> can break other sites on the server.</p></div>
+      <div class="pain-item reveal"><h3>Small things, big failures</h3><p>Missing time-zone data (<code>Asia/Calcutta</code>), a patched-Qt wkhtmltopdf, a busy apt lock, a dropped connection mid-download.</p></div>
+      <div class="pain-item reveal"><h3>Interrupted = broken</h3><p>Stop half way and you're left with a half-made bench, a half-configured package and no idea what's done and what isn't.</p></div>
+    </div>
+
+    <div class="versus">
+      <div class="vs-box manual reveal">
+        <header><span class="err">✘ by hand</span><span class="dim">~40 commands, and pray</span></header>
+<pre>sudo apt-get install git python3-dev python3-setuptools \
+  python3-pip virtualenv software-properties-common \
+  mariadb-server mariadb-client redis-server xvfb \
+  libfontconfig wkhtmltopdf libmysqlclient-dev
+sudo mysql_secure_installation
+sudo nano /etc/mysql/my.cnf      # charset settings…
+sudo systemctl restart mariadb
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/…/install.sh | bash
+source ~/.bashrc && nvm install 24
+npm install -g yarn
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv python install 3.14
+uv tool install frappe-bench
+bench init --frappe-branch version-16 frappe-bench
+cd frappe-bench
+bench new-site site1.local --mariadb-root-password …
+bench --site site1.local add-to-hosts
+bench use site1.local
+bench start   # → error: engine "node" is incompatible …</pre>
+      </div>
+      <div class="vs-box one reveal">
+        <header><span class="ok">✔ with frappe-installer</span><span class="dim">one command</span></header>
+<pre><span class="dim">$</span> <span class="grad">npm create frappe@latest</span>
+
+<span class="dim">  …answer 3 questions…</span>
+
+  <span class="ok">✔  FRAPPE 16 IS READY</span>
+  <span class="ok">✔</span> 20 of 20 health checks passed
+  <span class="ok">✔</span> Site answered HTTP 200
+  <span class="dim">Run</span>  cd ~/frappe16/frappe-bench &amp;&amp; ./start</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ======================= HOW IT WORKS ======================= -->
+<section id="how">
+  <div class="wrap">
+    <div class="eyebrow reveal"><b>02</b> · what it does</div>
+    <h2 class="reveal">Ten stages. <span class="grad">Every one checked.</span></h2>
+    <p class="lead reveal">It looks at what's already on the machine, plans an isolated environment,
+      installs only what's missing, and refuses to call it done until the site actually answers.</p>
+
+    <div class="steps" id="steps"></div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ======================= FEATURES ======================= -->
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow reveal"><b>03</b> · features</div>
+    <h2 class="reveal">Built for the install <span class="grad">that goes wrong</span>.</h2>
+    <p class="lead reveal">A happy-path installer is easy. This one is designed around everything
+      that can fail — and what to do when it does.</p>
+
+    <div class="cards">
+      <div class="card reveal"><span class="key">[1]</span>
+        <h3><span class="mark">◉</span>Isolated environments</h3>
+        <p class="tag grad">Install it twice — nothing collides</p>
+        <ul><li>Own MariaDB instance per install</li><li>Own Redis and ports (8001, 8002, …)</li><li>Own Node.js version via <code>./start</code></li><li>Proves other installs are untouched</li></ul></div>
+
+      <div class="card reveal"><span class="key">[2]</span>
+        <h3><span class="mark">◉</span>Resume &amp; self-heal</h3>
+        <p class="tag grad">Interrupted? Run it again.</p>
+        <ul><li>Ctrl+C saves progress — continue later</li><li>Fixes network glitches, apt locks, stale lists</li><li>Retries only steps that are safe to repeat</li><li>Falls back if a private database can't start</li></ul></div>
+
+      <div class="card reveal"><span class="key">[3]</span>
+        <h3><span class="mark">◉</span>Failures that explain</h3>
+        <p class="tag grad">Where · why · how to fix</p>
+        <ul><li>Names the exact step that failed</li><li>Shows the real error line, not a traceback dump</li><li>Suggests the fix for 20+ known problems</li><li>Never rolls back or deletes anything</li></ul></div>
+
+      <div class="card reveal"><span class="key">[4]</span>
+        <h3><span class="mark">◉</span>Respects existing Frappe</h3>
+        <p class="tag grad">Keep · update · upgrade · alongside</p>
+        <ul><li>Detects every bench on the machine</li><li>Upgrade 15 → 16 in place, after a full backup</li><li>Finishes an upgrade that stopped half way</li><li>Never drops a database or touches other benches</li></ul></div>
+
+      <div class="card reveal"><span class="key">[5]</span>
+        <h3><span class="mark">◉</span>Production mode</h3>
+        <p class="tag grad">From laptop to server</p>
+        <ul><li>supervisor + nginx, served by your domain</li><li>Scheduler on, restarts on failure and boot</li><li>Let's Encrypt HTTPS &amp; ufw firewall <span class="warn">(beta)</span></li><li>Other nginx sites left untouched</li></ul></div>
+
+      <div class="card reveal"><span class="key">[6]</span>
+        <h3><span class="mark">◉</span>Secure by default</h3>
+        <p class="tag grad">Nothing piped into a shell</p>
+        <ul><li>Downloads pinned to SHA-256 / git commit</li><li>MariaDB root is never changed</li><li>Passwords never on screen or in <code>ps</code></li><li>Checks network exposure and file permissions</li></ul></div>
+
+      <div class="card reveal"><span class="key">[7]</span>
+        <h3><span class="mark">◉</span>Verified, not assumed</h3>
+        <p class="tag grad">20+ health checks</p>
+        <ul><li>Database, Redis, Node, Python, assets</li><li>An HTTP request to the new site</li><li>Success screen says <em>why</em> it's ready</li><li>Warnings named, never hidden</li></ul></div>
+
+      <div class="card reveal"><span class="key">[8]</span>
+        <h3><span class="mark">◉</span>A terminal you enjoy</h3>
+        <p class="tag grad">Arrow keys, not y/N walls</p>
+        <ul><li>Animated banner and progress track</li><li>Option cards, Yes/No toggles</li><li>Live spinner with the current log line</li><li>Plain output for CI and pipes</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ======================= ISOLATION ======================= -->
+<section id="isolation">
+  <div class="wrap">
+    <div class="eyebrow reveal"><b>04</b> · architecture</div>
+    <h2 class="reveal">Three layers, <span class="grad">one hard rule each</span>.</h2>
+    <p class="lead reveal">That's how a second install can't break the first — and why the installer
+      can prove it.</p>
+
+    <div class="layers">
+      <div class="layer reveal">
+        <header><b class="dim">SYSTEM LAYER</b><span>shared · rule: <span class="ok">add only</span></span></header>
+        <p>apt packages, MariaDB / Redis / nginx binaries, nvm, uv — installed if missing; never upgraded, reconfigured or removed.</p>
+      </div>
+      <div class="layer reveal">
+        <header><b class="grad">ENVIRONMENT LAYER</b><span>one per install · rule: <span class="ok">owned, nothing shared</span></span></header>
+        <div class="envs">
+          <div class="env"><b>frappe16</b><br>bench + Python venv<br>Node 24 · <span class="p">./start</span><br>MariaDB <span class="p">frappe-db@frappe16 :3307</span><br>Redis <span class="p">:13001 :11001</span> · web <span class="p">:8001</span></div>
+          <div class="env"><b>frappe15</b><br>bench + Python venv<br>Node 18 · <span class="p">./start</span><br>MariaDB <span class="p">frappe-db@frappe15 :3308</span><br>Redis <span class="p">:13002 :11002</span> · web <span class="p">:8002</span></div>
+        </div>
+      </div>
+      <div class="layer reveal">
+        <header><b class="dim">SITE LAYER</b><span>Frappe's own · rule: <span class="ok">one database per site, never dropped</span></span></header>
+        <p>Each site keeps its own database inside its environment's MariaDB instance.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ======================= PLATFORMS ======================= -->
+<section id="platforms">
+  <div class="wrap">
+    <div class="eyebrow reveal"><b>05</b> · tested on every release</div>
+    <h2 class="reveal">Fresh machines, <span class="grad">every single release</span>.</h2>
+    <p class="lead reveal">Nothing is published unless full installs pass on clean systems in CI.</p>
+    <div class="table-wrap reveal">
+      <table>
+        <thead><tr><th>Platform</th><th>Frappe 15</th><th>Frappe 16</th></tr></thead>
+        <tbody>
+          <tr><td>Ubuntu 22.04</td><td class="ok">✔ tested</td><td class="dim">— not supported by Frappe</td></tr>
+          <tr><td>Ubuntu 24.04</td><td class="ok">✔ upgrade 15 → 16</td><td class="ok">✔ local · production · npm · two side by side</td></tr>
+          <tr><td>Ubuntu 26.04</td><td class="dim">—</td><td class="ok">✔ tested</td></tr>
+          <tr><td>Debian 12</td><td class="ok">✔ tested</td><td class="dim">— not supported by Frappe</td></tr>
+          <tr><td>Debian 13</td><td class="dim">—</td><td class="ok">✔ tested</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ======================= INSTALL ======================= -->
+<section id="install">
+  <div class="wrap">
+    <div class="eyebrow reveal"><b>06</b> · get started</div>
+    <h2 class="reveal">One command. <span class="grad">Three questions.</span></h2>
+    <p class="lead reveal">Needs Ubuntu 22.04+ or Debian 12+, a user with sudo, and Node.js only to
+      start the installer — it brings the Node.js Frappe needs by itself.</p>
+
+    <div class="install">
+      <div class="inst reveal"><h3 class="grad">Recommended</h3><p>Always the newest version. Press <b class="ok">y</b> at “Ok to proceed?”.</p>
+<button class="copy inst-copy" data-copy="npm create frappe@latest">copy</button>
+<pre><span class="c">$</span> npm create frappe@latest</pre></div>
+      <div class="inst reveal"><h3>With options</h3><p>Everything after <code>--</code> goes to the installer.</p>
+<button class="copy inst-copy" data-copy="npm create frappe@latest -- --env prod --version 16 --domain erp.example.com">copy</button>
+<pre><span class="c">$</span> npm create frappe@latest -- \
+    --env prod --version 16 \
+    --domain erp.example.com</pre></div>
+      <div class="inst reveal"><h3>Without Node.js</h3><p>Download a release, verify, run.</p>
+<button class="copy inst-copy" data-copy="sha256sum -c SHA256SUMS &amp;&amp; tar -xzf create-frappe-*.tgz &amp;&amp; ./package/install-frappe.sh">copy</button>
+<pre><span class="c"># from GitHub Releases</span>
+<span class="c">$</span> sha256sum -c SHA256SUMS
+<span class="c">$</span> tar -xzf create-frappe-*.tgz
+<span class="c">$</span> ./package/install-frappe.sh</pre></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span><span class="grad" style="font-weight:800">frappe-installer</span> · <span class="dim">npm: create-frappe</span></span>
+    <span><a href="https://github.com/Sakthi10122004/frappe-installer">GitHub</a> · <a href="https://www.npmjs.com/package/create-frappe">npm</a> · <a href="https://github.com/Sakthi10122004/frappe-installer/blob/main/CHANGELOG.md">Changelog</a></span>
+    <span class="dim">Not affiliated with Frappe Technologies.</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- the installer's block-letter banner, with its gradient ---------- */
+  var LOGO = [
+    "           ███████╗██████╗  █████╗ ██████╗ ██████╗ ███████╗           ",
+    "           ██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔════╝           ",
+    "           █████╗  ██████╔╝███████║██████╔╝██████╔╝█████╗             ",
+    "           ██╔══╝  ██╔══██╗██╔══██║██╔═══╝ ██╔═══╝ ██╔══╝             ",
+    "           ██║     ██║  ██║██║  ██║██║     ██║     ███████╗           ",
+    "           ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝     ╚══════╝           ",
+    "██╗███╗   ██╗███████╗████████╗ █████╗ ██╗     ██╗     ███████╗██████╗ ",
+    "██║████╗  ██║██╔════╝╚══██╔══╝██╔══██╗██║     ██║     ██╔════╝██╔══██╗",
+    "██║██╔██╗ ██║███████╗   ██║   ███████║██║     ██║     █████╗  ██████╔╝",
+    "██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ██╔══╝  ██╔══██╗",
+    "██║██║ ╚████║███████║   ██║   ██║  ██║███████╗███████╗███████╗██║  ██║",
+    "╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝"
+  ];
+  // Same gradient as the terminal: cyan (0,212,255) → blue (64,120,255) → violet (168,85,247)
+  function grad(t) {
+    var a = [0, 212, 255], b = [64, 120, 255], c = [168, 85, 247], f, x, y;
+    if (t <= .5) { f = t / .5; x = a; y = b; } else { f = (t - .5) / .5; x = b; y = c; }
+    return "rgb(" + Math.round(x[0] + (y[0] - x[0]) * f) + "," + Math.round(x[1] + (y[1] - x[1]) * f) + "," + Math.round(x[2] + (y[2] - x[2]) * f) + ")";
+  }
+  function gradientText(text) {
+    var out = "", n = text.length;
+    for (var i = 0; i < n; i++) {
+      var ch = text[i];
+      out += ch === " " ? " " : '<span style="color:' + grad(i / Math.max(n - 1, 1)) + '">' + esc(ch) + "</span>";
+    }
+    return out;
+  }
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+  var logo = document.getElementById("logo");
+  LOGO.forEach(function (row, i) {
+    var span = document.createElement("span");
+    span.className = "row";
+    span.style.animationDelay = (i * 0.045) + "s";
+    span.innerHTML = gradientText(row);
+    logo.appendChild(span);
+  });
+
+  /* ---------- typewriter tagline ---------- */
+  var tagline = "Frappe, installed in one command.";
+  var typed = document.getElementById("typed");
+  if (reduce) { typed.textContent = tagline; }
+  else {
+    var k = 0;
+    setTimeout(function tick() {
+      typed.textContent = tagline.slice(0, ++k);
+      if (k < tagline.length) setTimeout(tick, 38);
+    }, 700);
+  }
+
+  /* ---------- segmented stage track ---------- */
+  var track = document.getElementById("track");
+  for (var s = 0; s < 10; s++) {
+    var seg = document.createElement("i");
+    track.appendChild(seg);
+  }
+  // stagger the fill of each segment
+  var css = "";
+  for (var j = 0; j < 10; j++) css += "#track i:nth-child(" + (j + 1) + ")::after{animation-delay:" + (1.2 + j * .12) + "s;background-position:" + (j * 11) + "% 0}";
+  var st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
+
+  /* ---------- the ten stages ---------- */
+  var STAGES = [
+    ["System detection", "OS, CPU, sudo, internet, memory — and installs what minimal servers lack."],
+    ["Existing environments", "Finds every bench on the machine; offers to continue an unfinished install."],
+    ["Environment setup", "Local or production, Frappe 15 or 16, its own ports and database planned."],
+    ["Dependencies", "Only what's missing, from verified sources — repairs interrupted apt runs."],
+    ["MariaDB", "A private instance for this environment; the system server is left alone."],
+    ["Redis", "Installed and checked; each environment runs its own Redis."],
+    ["Node.js + Python", "The exact versions via nvm and uv — your system's own are untouched."],
+    ["Bench", "bench init on the tested version, own ports, a ./start that picks the right Node."],
+    ["Site", "Created with passwords kept off the command line; credentials saved privately."],
+    ["Verification", "20+ checks, an HTTP request, and proof other environments are unchanged."]
+  ];
+  var steps = document.getElementById("steps");
+  STAGES.forEach(function (st, i) {
+    var d = document.createElement("div");
+    d.className = "step reveal";
+    d.innerHTML = '<div class="bar"></div><div class="n"><span style="color:' + grad(i / 9) + '">' +
+      String(i + 1).padStart(2, "0") + '</span><small>/10</small></div><h3>' + st[0] + "</h3><p>" + st[1] + "</p>";
+    steps.appendChild(d);
+  });
+
+  /* ---------- copy buttons ---------- */
+  function legacyCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.top = "0"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select(); ta.setSelectionRange(0, text.length);
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  function copyText(text) {
+    // navigator.clipboard only exists on secure pages (https / localhost);
+    // opened as a file, fall back to the classic copy command.
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text).catch(function () {
+        if (!legacyCopy(text)) throw new Error("copy failed");
+      });
+    }
+    return legacyCopy(text) ? Promise.resolve() : Promise.reject(new Error("copy failed"));
+  }
+  function flash(b, cls, label) {
+    b.textContent = label; b.classList.add(cls);
+    setTimeout(function () { b.textContent = "copy"; b.classList.remove(cls); }, 1800);
+  }
+  document.querySelectorAll("[data-copy]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var text = b.getAttribute("data-copy");
+      copyText(text).then(function () { flash(b, "done", "copied ✔"); }, function () {
+        // Couldn't copy: select the command so Ctrl+C works, and say so.
+        var code = b.parentElement.querySelector("code, pre");
+        if (code) { var r = document.createRange(); r.selectNodeContents(code); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+        flash(b, "fail", "press Ctrl+C");
+      });
+    });
+  });
+
+  /* ---------- reveal on scroll ---------- */
+  var io = "IntersectionObserver" in window ? new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+  }, { threshold: .12 }) : null;
+  document.querySelectorAll(".reveal").forEach(function (el, i) {
+    el.style.transitionDelay = ((i % 4) * 60) + "ms";
+    if (io && !reduce) io.observe(el); else el.classList.add("in");
+  });
+
+  /* ---------- the demo terminal: a replay of a real install ---------- */
+  var screen = document.getElementById("screen");
+  var G = function (t) { return '<span class="grad">' + t + "</span>"; };
+  var D = function (t) { return '<span class="dim">' + t + "</span>"; };
+  var OK = '<span class="ok">✔</span>';
+  function stage(n, name, time) {
+    var bar = "";
+    for (var i = 0; i < 10; i++) {
+      if (i < n - 1) bar += '<span style="color:' + grad(i / 9) + '">━━━━</span> ';
+      else if (i === n - 1) bar += '<span style="color:#fff;font-weight:700">╍╍╍╍</span> ';
+      else bar += D("────") + " ";
+    }
+    return [
+      "",
+      '  <span class="s-num" style="color:' + grad(n / 10) + '">' + String(n).padStart(2, "0") + "</span>" + D("/10") +
+        '  <span class="s-head">' + name + "</span>   " + D("⏱ " + time),
+      "  " + bar + D(String((n - 1) * 10).padStart(3, " ") + "%")
+    ];
+  }
+  // Each item: a line (string), or {spin: label, secs, done} for a spinner step.
+  var SCRIPT = [].concat(
+    ["  " + D("Universal installer & environment manager  ·  v1.0.0-rc.1")],
+    stage(1, "System detection", "1s"),
+    ["  " + OK + " Detected: Ubuntu 24.04 LTS (x86_64)", "  " + OK + " Passwordless sudo available", "  " + OK + " Internet connectivity confirmed"],
+    stage(3, "Environment setup", "6s"),
+    ["  " + OK + " Where will this Frappe run? " + D("·") + ' <span style="color:var(--cyan)">Local Setup</span>',
+     "  " + OK + " Which Frappe Framework version do you want? " + D("·") + ' <span style="color:var(--cyan)">Frappe 16</span>',
+     "  " + D("Environment ") + "frappe16   " + D("Ports ") + "web 8001 · redis 13001/11001",
+     "  " + D("Database    ") + "own MariaDB instance (frappe-db@frappe16, 127.0.0.1:3307)"],
+    stage(5, "MariaDB", "1m 52s"),
+    [{ spin: "Installing MariaDB server + client", secs: 1.6, done: "Installing MariaDB server + client " + D("· 24s") },
+     "  " + OK + " Private database ready: frappe-db@frappe16 on 127.0.0.1:3307"],
+    stage(7, "Node.js + Yarn + Python", "2m 30s"),
+    [{ spin: "Installing Node.js 24", secs: 1.2, done: "Installing Node.js 24 " + D("· 17s") },
+     { spin: "Installing uv 0.13.4 (checksum-verified)", secs: .9, done: "Installing uv 0.13.4 (checksum-verified) " + D("· 11s") },
+     '  <span class="warn">↻</span> ' + D("Self-healing:") + " network glitch — waited and retrying " + D("(retry 1 of 2)"),
+     "  " + OK + " Python 3.14 ready " + D("(system Python untouched)")],
+    stage(9, "Site creation", "7m 40s"),
+    [{ spin: "Creating site frappe.local", secs: 1.8, done: "Creating site frappe.local " + D("· 32s"), live: "Updating DocTypes for frappe : [=====>    ] 54%" },
+     "  " + OK + " Credentials saved " + D("(chmod 600)")],
+    stage(10, "Verification", "8m 15s"),
+    ["  " + OK + " Own database instance running", "  " + OK + " ./start uses this environment's Node.js v24",
+     "  " + OK + " Isolation: 3 other environment item(s) untouched", "  " + OK + " HTTP health check (site responded with 200)",
+     "",
+     '  <span class="ok">╭──────────────────────────────────────────────────────╮</span>',
+     '  <span class="ok">│</span>   <span class="ok" style="font-weight:700">✔  FRAPPE 16 IS READY</span>                              <span class="ok">│</span>',
+     '  <span class="ok">│</span>                                                      <span class="ok">│</span>',
+     '  <span class="ok">│</span>   ' + OK + ' 20 of 20 health checks passed                    <span class="ok">│</span>',
+     '  <span class="ok">│</span>   ' + OK + ' Site answered HTTP 200 — up and serving pages    <span class="ok">│</span>',
+     '  <span class="ok">│</span>   ' + D("Open ") + ' <span style="color:var(--cyan)">http://frappe.local:8001</span>                     <span class="ok">│</span>',
+     '  <span class="ok">│</span>   ' + D("Run  ") + ' cd ~/frappe16/frappe-bench &amp;&amp; ./start        <span class="ok">│</span>',
+     '  <span class="ok">╰──────────────────────────────────────────────────────╯</span>']
+  );
+
+  var playing = 0;
+  function comet(i) {
+    var track = 10, tail = 3, head = i % (2 * (track - 1)), out = "";
+    if (head >= track) head = 2 * (track - 1) - head;
+    for (var c = 0; c < track; c++) {
+      var dd = Math.abs(head - c);
+      out += dd === 0 ? '<span style="color:' + grad((i % 20) / 19) + ';font-weight:700">▰</span>'
+           : dd <= tail ? '<span style="color:' + grad(((i + dd * 3) % 20) / 19) + '">▰</span>' : D("▱");
+    }
+    return out;
+  }
+  function play() {
+    var run = ++playing;
+    screen.innerHTML = "";
+    var idx = 0;
+    function addLine(html) {
+      var el = document.createElement("span");
+      el.className = "l"; el.innerHTML = html;
+      screen.appendChild(el);
+      while (screen.scrollHeight > screen.clientHeight && screen.firstChild) screen.removeChild(screen.firstChild);
+      return el;
+    }
+    function next() {
+      if (run !== playing) return;
+      if (idx >= SCRIPT.length) { setTimeout(function () { if (run === playing) play(); }, 6000); return; }
+      var item = SCRIPT[idx++];
+      if (typeof item === "string") { addLine(item); setTimeout(next, reduce ? 0 : 140); return; }
+      var el = addLine(""), frames = Math.round(item.secs * 12.5), f = 0;
+      (function spin() {
+        if (run !== playing) return;
+        if (f < frames && !reduce) {
+          var t = Math.floor(f / 12.5);
+          el.innerHTML = "  " + comet(f) + ' <span style="font-weight:700">' + item.spin + "</span> " +
+            D("0:" + String(t).padStart(2, "0") + (item.live ? "  │ " + item.live : ""));
+          f++; setTimeout(spin, 80);
+        } else { el.innerHTML = "  " + OK + " " + item.done; setTimeout(next, 160); }
+      })();
+    }
+    // banner header inside the terminal
+    addLine('  <span class="grad" style="font-weight:800">F R A P P E   I N S T A L L E R</span>');
+    next();
+  }
+  document.getElementById("replay").addEventListener("click", play);
+
+  // start the replay when the terminal scrolls into view
+  if ("IntersectionObserver" in window) {
+    var started = false;
+    new IntersectionObserver(function (es, obs) {
+      if (es[0].isIntersecting && !started) { started = true; play(); obs.disconnect(); }
+    }, { threshold: .25 }).observe(screen);
+  } else { play(); }
+})();
+</script>
+</body>
+</html>
