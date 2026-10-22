@@ -1,59 +1,89 @@
-# Universal Frappe Installer & Environment Manager
+# Frappe Installer
 
-A robust, modular, and professional-grade installer for the [Frappe Framework](https://frappeframework.com/). 
+Install the [Frappe Framework](https://frappeframework.com/) (v15 or v16) on Ubuntu or Debian
+with one command — for local development or a production server. Every install is isolated,
+resumable and verified before it says it's done.
 
-This project aims to be a production-ready environment manager that handles Frappe v15 and v16 with a strong emphasis on idempotency, safety, state tracking, and error recovery.
-
-## Features
-
-- **Multi-Version Support:** First-class support for Frappe 15 and Frappe 16 (with correct version pinning for Python, Node.js, and MariaDB).
-- **Idempotent by Design:** Safe to re-run at any time. It remembers what it has done and skips completed steps.
-- **Resume Anywhere:** Ctrl+C shows where it stopped and saves progress; the next run offers to continue exactly there or start fresh. Half-finished package installs are repaired automatically.
-- **Existing Installs:** If Frappe is already installed, choose to keep & repair it, update it, upgrade 15 → 16 in place (after a full backup), or install another version alongside. (In-place downgrades are impossible — Frappe migrations only go forward — so "downgrade" installs the older version as a separate bench.)
-- **Strict Isolation:** Uses `uv` for Python and `nvm` for Node.js, ensuring your system environments are never contaminated.
-- **Safety First:** It will **never** drop existing databases, delete users, change MariaDB root's login, or modify unrelated MariaDB configurations. On a socket-auth server it creates its own `frappe_installer_admin@localhost` account instead; the credentials are kept in `~/.frappe-installer/mariadb-admin.cnf` (chmod 600).
-- **Verified Downloads:** Nothing is piped from the internet into a shell. uv and wkhtmltopdf are pinned to SHA-256 checksums and NVM to an exact git commit (`lib/constants.sh`); a mismatch aborts. Node and Python downloads are checksum-verified by nvm and uv themselves.
-- **Fast Local Setups:** With `--env local`, MariaDB flushes its log about once a second instead of on every commit, which makes site creation several times faster (a machine crash can lose up to ~1s of writes; production keeps full durability). A freshly created site is not migrated a second time.
-- **Security Checks:** Verification warns if MariaDB/Redis listen beyond localhost, if credential files are not private, or if anonymous MariaDB accounts exist. The Administrator password is never printed — it lives in the chmod-600 credentials file.
-- **External Database:** If MariaDB can't run locally, `--doctor --component mariadb` can point the installer at a remote or Docker MariaDB instead.
-- **Environment Registry:** Keeps track of installed benches and sites in a central JSON registry (`~/.frappe-installer/environments.json`).
-- **Comprehensive Verification:** Verifies 15+ health checks at the end of the installation to ensure the site is truly ready.
-
-## Requirements
-
-The installer automatically checks for these requirements and will warn or block if they are not met.
-
-| Dependency | Frappe 15 | Frappe 16 |
-|---|---|---|
-| **OS** | Ubuntu 22.04+, Debian 12+ | Ubuntu 24.04+, Debian 13+ |
-| **Python** | 3.10 | 3.14.x exactly (`>=3.14,<3.15`) |
-| **Node.js** | 18.x | 24+ |
-| **MariaDB** | 10.6.6+ | 11.8 recommended |
-| **Redis** | 6+ | 8 recommended |
-
-## Installation & Usage
-
-**With Node.js/npm already installed:**
+## Quick start
 
 ```bash
-npm create frappe@latest          # or: npx create-frappe
-npm create frappe@latest -- --env local --version 16   # pass options after --
+npm create frappe@latest
 ```
 
-Or install the command once: `npm install -g create-frappe`, then run `create-frappe`.
-(`npm install` alone never runs the installer — it has no install scripts.)
-
-**On a fresh server without Node.js** — download a release, check it, run it:
+Answer a few questions; the installer does the rest (10–15 minutes on a fresh machine). When it
+finishes it shows the address and how to start:
 
 ```bash
-v=0.0.1   # latest version: https://github.com/Sakthi10122004/frappe-installer/releases
+cd ~/frappe16/frappe-bench && ./start      # then open the URL shown, e.g. http://frappe.local:8001
+```
+
+## Install with npm
+
+The installer is published on npm as [`create-frappe`](https://www.npmjs.com/package/create-frappe).
+
+### 1. What you need
+
+- **Ubuntu 22.04+ or Debian 12+** (Frappe 16 needs Ubuntu 24.04+ / Debian 13+), x86_64
+- A user with **sudo** (for production: a regular user, not root)
+- An internet connection
+- **Node.js 16+ with npm** — only to *start* the installer. It installs the Node.js version
+  Frappe needs by itself (via nvm), without touching yours.
+
+No Node.js yet? Either install it (`sudo apt install -y nodejs npm`), or skip npm entirely and
+use the [download without Node.js](#without-nodejs).
+
+### 2. Run it
+
+| Way | Command | Good for |
+|---|---|---|
+| **npm create** (recommended) | `npm create frappe@latest` | always the newest version |
+| npx | `npx create-frappe@latest` | the same, with npx |
+| global command | `npm install -g create-frappe`, then `create-frappe` | running it often |
+
+Pass installer options after `--` with `npm create` (npx needs no `--`):
+
+```bash
+npm create frappe@latest -- --env local --version 16
+npx create-frappe@latest --env prod --version 16 --domain erp.example.com
+npm create frappe@latest -- --non-interactive --env local --version 15 --site dev.local
+```
+
+All options: `npx create-frappe@latest --help` (and [Options](#options) below).
+
+### 3. Check, update, remove
+
+```bash
+npm view create-frappe version             # newest published version
+npx create-frappe@latest --help | head -1  # the version you would run
+npm update -g create-frappe                # update the global command
+npm uninstall -g create-frappe             # remove the command (your Frappe installs stay)
+```
+
+### Good to know
+
+- **`npm install create-frappe` (without `-g`) does not run anything.** It only downloads the
+  package into `./node_modules`. Use `npm create frappe@latest` or `npx create-frappe@latest`.
+- **Run it from your home folder**, not from inside a folder that has its own copy in
+  `node_modules` — npm would run that (possibly old) copy instead.
+- **Re-run the same command any time:** it resumes an unfinished install, or offers to keep,
+  update or upgrade the Frappe it finds.
+- **`npm install -g` may need `sudo`** if your Node.js came from apt; with nvm it doesn't.
+- **Release candidates:** `npm create frappe@next`.
+
+### Without Node.js
+
+Every [GitHub Release](https://github.com/Sakthi10122004/frappe-installer/releases) has the
+package and its checksum. Download, verify, run:
+
+```bash
+v=1.0.0-rc.1   # pick the version from the Releases page
 base="https://github.com/Sakthi10122004/frappe-installer/releases/download/v${v}"
 curl -fLO "${base}/create-frappe-${v}.tgz" -fLO "${base}/SHA256SUMS"
 sha256sum -c SHA256SUMS && tar -xzf "create-frappe-${v}.tgz"
 ./package/install-frappe.sh
 ```
 
-**From a git checkout:**
+### From a git checkout
 
 ```bash
 git clone https://github.com/Sakthi10122004/frappe-installer.git
@@ -61,31 +91,61 @@ cd frappe-installer
 ./install-frappe.sh
 ```
 
-Releases are published from CI only after the full test matrix passes, with
-[npm provenance](https://docs.npmjs.com/generating-provenance-statements) linking each package to the commit it was built from.
+Releases are published by CI only after the full test matrix passes, with
+[npm provenance](https://docs.npmjs.com/generating-provenance-statements) linking each package
+to the commit it was built from. See [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+## Features
+
+- **Frappe 15 and 16**, each with the exact Python, Node.js and MariaDB versions it needs.
+- **Isolated environments:** every install gets its own MariaDB instance, Redis, ports and
+  Node.js version. Other Frappe installs are never changed — and the installer proves it.
+- **Existing installs:** keep & repair, update, upgrade 15 → 16 in place (after a full backup),
+  or install another version alongside. ("Downgrade" installs the older version alongside —
+  Frappe migrations only go forward.)
+- **Resume and self-heal:** Ctrl+C or a failure saves progress; known problems (network
+  glitches, apt locks, stale package lists, missing time-zone data …) are fixed and retried.
+- **Clear failures:** every failure shows where, why and how to fix it.
+- **Production mode:** supervisor + nginx, scheduler, served by domain; HTTPS and firewall (beta).
+- **Secure by default:** verified downloads, MariaDB root never changed, passwords never on the
+  command line or screen, credential files private, network-exposure checks.
+- **Verification:** 20+ health checks, including an HTTP request to the new site.
+
+## Requirements
+
+The installer checks these itself and warns or stops if they are not met.
+
+| | Frappe 15 | Frappe 16 |
+|---|---|---|
+| **OS** | Ubuntu 22.04+, Debian 12+ | Ubuntu 24.04+, Debian 13+ |
+| **Python** (installed for you) | 3.10 | 3.14 |
+| **Node.js** (installed for you) | 18 | 24 |
+| **MariaDB** | 10.6+ | 11.8 recommended |
+| **RAM / disk** | 2 GB+ / 5 GB+ free | 2 GB+ / 5 GB+ free |
 
 ### Options
 
-```bash
-./install-frappe.sh [OPTIONS]
+```text
+create-frappe [OPTIONS]        (or ./install-frappe.sh [OPTIONS])
 
-  --version VERSION    Frappe version to install (15 or 16). Default: interactive prompt
-  --path PATH          Installation directory. Default: ~/frappe<VERSION>
-  --site SITE_NAME     Site name to create. Default: frappe.local
-  --non-interactive    Never prompt. Fails automatically instead of asking.
-  --no-animation       Static output (or FRAPPE_INSTALLER_NO_ANIMATION=1; NO_COLOR=1 disables colors)
-  --check              System check — make no changes, report status.
-  --env TYPE           Environment type (local or prod). Required with --non-interactive.
-  --domain NAME        Production: the site's domain (e.g. erp.example.com)
+  --version VERSION    Frappe version: 15 or 16 (default: asks)
+  --env TYPE           local or prod (required with --non-interactive)
+  --path PATH          Where to install (default: ~/frappe<VERSION>)
+  --site SITE_NAME     Site to create (default: frappe.local)
+  --non-interactive    Never ask; fail instead
+  --domain NAME        Production: the site's domain, e.g. erp.example.com
   --letsencrypt-email EMAIL
-                       Production: get a Let's Encrypt HTTPS certificate
+                       Production: get a Let's Encrypt HTTPS certificate (beta)
   --no-firewall        Production: don't enable ufw
   --action ACTION      Existing bench at --path: keep | update | upgrade
-  --doctor             Diagnose problems. Currently: --doctor --component mariadb
-  --list               List all detected Frappe environments.
-  --dry-run            Simulate installation — make zero changes (Coming soon)
-  --repair             Attempt to repair a broken installation (Coming soon)
-  -h, --help           Show help and exit
+  --no-fallback        Fail instead of using the shared MariaDB server when the
+                       environment's own database can't be created
+  --no-animation       Static output (NO_COLOR=1 also disables colors)
+  --list               List the Frappe environments on this machine
+  --check              System check only — change nothing
+  --doctor --component mariadb
+                       Diagnose MariaDB problems
+  -h, --help           Show help
 ```
 
 ## Isolated Environments
@@ -175,11 +235,14 @@ Production mode sets up:
 |---|---|
 | **Processes** | gunicorn (bound to 127.0.0.1), workers, scheduler, socketio and Redis under supervisor — restarted on failure and at boot |
 | **Web** | nginx in front on 80/443; the site is served by its domain (`dns_multitenant`). Other nginx sites are left untouched |
-| **HTTPS** | Let's Encrypt certificate (renews automatically), installed the Frappe way so `bench setup nginx` keeps it |
-| **Firewall** | ufw allowing only SSH (detected port), 80 and 443; fail2ban for SSH brute force |
+| **HTTPS** *(beta)* | Let's Encrypt certificate (renews automatically), installed the Frappe way so `bench setup nginx` keeps it |
+| **Firewall** *(beta)* | ufw allowing only SSH (detected port), 80 and 443; fail2ban for SSH brute force |
 | **Permissions** | nginx reads assets through group membership (home isn't opened to everyone); site configs, private files and backups are owner-only |
 | **Database** | full per-commit durability (the local-only speed-up is not applied) |
 | **Backups** | bench's cron backups every 6 hours — copy them off the server |
+
+*Beta:* HTTPS and the firewall need a real server with a public domain, so CI cannot run
+them; everything else in production mode is tested on every release.
 
 Scripted maintenance of an existing bench:
 

@@ -91,6 +91,12 @@ assert_eq "package.json has no dependencies (the installer is pure bash)" "{}" \
 assert_eq "node_modules is not tracked by git" "0" \
   "$(git ls-files node_modules package-lock.json 2>/dev/null | grep -c . || true)"
 
+echo "== pinned versions =="
+assert_eq "versions.yaml pins the same bench as the installer (both Frappe versions)" "2" \
+  "$(grep -c "frappe-bench==${BENCH_CLI_VERSION}\"" config/versions.yaml || true)"
+assert_eq "the published package has no license file (proprietary: UNLICENSED)" "UNLICENSED absent" \
+  "$(python3 -c 'import json; d=json.load(open("package.json")); print(d["license"], "absent" if "LICENSE" not in d["files"] else "listed")')"
+
 echo ""
 echo "============================================================"
 echo "RESULTS: ${PASS} passed, ${FAIL} failed"

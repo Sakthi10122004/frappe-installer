@@ -29,7 +29,7 @@ frappe:
     pip_min: "20"
     wkhtmltopdf: "0.12.6"    # Patched Qt build
     nvm: "v0.40.3"
-    bench_install: "uv tool install frappe-bench"
+    bench_install: "uv tool install frappe-bench==5.31.0"   # pinned: BENCH_CLI_VERSION
     os_support:
       ubuntu_min: "22.04"     # Official support
       debian_min: "12"        # Bookworm
@@ -47,7 +47,7 @@ frappe:
     pip_min: "25.3"
     wkhtmltopdf: "0.12.6"    # Patched Qt build (archived project, Frappe still requires it)
     nvm: "v0.40.3"
-    bench_install: "uv tool install frappe-bench"
+    bench_install: "uv tool install frappe-bench==5.31.0"   # pinned: BENCH_CLI_VERSION
     os_support:
       ubuntu_min: "24.04"     # Official support
       debian_min: "13"        # Trixie

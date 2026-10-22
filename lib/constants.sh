@@ -41,6 +41,10 @@ DEFAULT_INSTALL_PATH_16="${HOME}/frappe16"
 DEFAULT_SITE_NAME="frappe.local"
 BENCH_SUBDIR="frappe-bench"
 
+# ---- Bench CLI (pinned to the version CI tests) ------------------------------
+# Raise only after the full CI matrix passes with the new version.
+BENCH_CLI_VERSION="5.31.0"
+
 # ---- Pinned downloads (see lib/download.sh) ---------------------------------
 # NVM: cloned at this tag and verified against the tag's commit.
 NVM_VERSION="v0.40.3"

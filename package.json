@@ -27,7 +27,7 @@
     "lib/",
     "config/",
     "README.md",
-    "LICENSE"
+    "CHANGELOG.md"
   ],
   "os": [
     "linux"

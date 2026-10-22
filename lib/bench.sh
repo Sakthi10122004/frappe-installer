@@ -9,13 +9,22 @@ install_bench_cli() {
   export PATH="${HOME}/.local/bin:${PATH}"
 
   if command -v bench >/dev/null 2>&1; then
-    ui_skip "Bench CLI ($(bench --version 2>/dev/null | head -n1))"
+    local have
+    have="$(bench --version 2>/dev/null | head -n1 || true)"
+    ui_skip "Bench CLI (${have})"
+    # bench is shared by every bench on this machine (system layer): an
+    # existing one is never replaced, just compared with the tested version.
+    if [[ -n "${have}" && "${have}" != "${BENCH_CLI_VERSION}" ]]; then
+      ui_warn "This installer was tested with bench ${BENCH_CLI_VERSION}; you have ${have} (left as is)."
+    fi
     return 0
   fi
 
-  run_step "Installing Bench CLI (uv tool install frappe-bench)" \
+  # Pinned: an untested new bench release must not change what users get
+  # (bench 5.x once dropped an option the installer relied on).
+  run_step "Installing Bench CLI ${BENCH_CLI_VERSION} (the tested version)" \
     "uv tool install frappe-bench" \
-    uv tool install frappe-bench
+    uv tool install "frappe-bench==${BENCH_CLI_VERSION}"
 
   export PATH="${HOME}/.local/bin:${PATH}"
   command -v bench >/dev/null 2>&1 || {

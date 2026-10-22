@@ -49,6 +49,15 @@ jobs:
             image: ubuntu:24.04
             version: "16"
             env: local
+          - name: debian-13 / frappe-16 / local
+            image: debian:13
+            version: "16"
+            env: local
+          - name: ubuntu-26.04 / frappe-16 / local
+            # Its MariaDB ships an active AppArmor profile: exercises extending it.
+            image: ubuntu:26.04
+            version: "16"
+            env: local
           - name: ubuntu-24.04 / frappe-16 / prod
             image: ubuntu:24.04
             version: "16"

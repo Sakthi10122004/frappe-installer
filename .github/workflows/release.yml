@@ -53,12 +53,31 @@ jobs:
           sha256sum create-frappe-*.tgz > SHA256SUMS
           cat SHA256SUMS
 
+      # Pre-releases (1.0.0-rc.1) go to the "next" tag, so `npm create
+      # frappe@latest` keeps the last stable version; testers opt in with @next.
+      - name: npm tag (latest, or next for pre-releases)
+        id: channel
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "tag=next" >> "${GITHUB_OUTPUT}"; echo "prerelease=--prerelease" >> "${GITHUB_OUTPUT}"
+          else
+            echo "tag=latest" >> "${GITHUB_OUTPUT}"; echo "prerelease=" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: publish to npm (trusted publishing, with provenance)
-        run: npm publish create-frappe-*.tgz --provenance --access public
+        run: npm publish create-frappe-*.tgz --provenance --access public --tag "${{ steps.channel.outputs.tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}   # unused once trusted publishing is set up
 
+      # Release notes: this version's section of CHANGELOG.md (falls back to
+      # GitHub's generated notes when the version has no section).
       - name: GitHub Release (tarball + checksums, for servers without Node)
-        run: gh release create "${GITHUB_REF_NAME}" create-frappe-*.tgz SHA256SUMS --generate-notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="${version}" 'index($0, "## " v " ") == 1 || $0 == "## " v {on = 1; next}
+                                 on && /^## / {exit}
+                                 on' CHANGELOG.md > notes.md
+          if [[ -s notes.md ]]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
+          gh release create "${GITHUB_REF_NAME}" create-frappe-*.tgz SHA256SUMS "${notes[@]}" ${{ steps.channel.outputs.prerelease }}
         env:
           GH_TOKEN: ${{ github.token }}
